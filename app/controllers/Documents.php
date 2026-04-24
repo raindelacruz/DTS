@@ -1,278 +1,1157 @@
 <?php
 
-
 require_once '../app/models/Document.php';
 require_once '../app/models/Department.php';
-
+require_once '../app/models/Notification.php';
 
 class Documents extends Controller
 {
     private $documentModel;
     private $departmentModel;
-
+    private $notificationModel;
 
     public function __construct()
     {
-        if(!isset($_SESSION['user_id'])) {
-            header('Location: ' . URLROOT);
-            exit;
-        }
+        requireLogin();
 
         $this->documentModel = new Document();
         $this->departmentModel = new Department();
-
+        $this->notificationModel = new Notification();
     }
 
-
-    /* ============================
-       LIST DOCUMENTS
-    ============================ */
-    public function index()
+    private function isManager()
     {
-        $documentModel = $this->model('Document');
+        return (($_SESSION['role'] ?? '') === 'manager');
+    }
 
-        $department_id = $_SESSION['department_id'];
+    private function requireParentDepartment()
+    {
+        $isParent = $this->departmentModel->isParentDepartment((int) $_SESSION['department_id']);
+        if (!$isParent) {
+            throw new AuthorizationException('Only parent departments can perform this action.');
+        }
+    }
 
-        $keyword = $_GET['keyword'] ?? '';
-        $status  = $_GET['status'] ?? '';
+    private function getListFilters()
+    {
+        return [
+            'keyword' => trim($_GET['keyword'] ?? ''),
+            'status' => trim($_GET['status'] ?? ''),
+            'type' => trim($_GET['type'] ?? ''),
+            'date_from' => trim($_GET['date_from'] ?? ''),
+            'date_to' => trim($_GET['date_to'] ?? '')
+        ];
+    }
 
-        if (!empty($keyword) || !empty($status)) {
-            $documents = $documentModel->search($department_id, $keyword, $status);
-        } else {
-            $documents = $documentModel->getAllByDepartment($department_id);
+    private function hasFilters($filters)
+    {
+        foreach ($filters as $value) {
+            if ($value !== '') {
+                return true;
+            }
         }
 
-        $data = [
-            'documents' => $documents,
-            'keyword'   => $keyword,
-            'status'    => $status
-        ];
-
-        $this->view('documents/index', $data);
+        return false;
     }
 
-    /* ============================
-       CREATE DOCUMENT FORM
-    ============================ */
-    public function create()
+    private function extractTypes($documents)
     {
-        $departments = $this->departmentModel->getAll();
+        $types = [];
+
+        foreach ($documents as $document) {
+            $type = trim((string) ($document['type'] ?? ''));
+            if ($type !== '') {
+                $types[$type] = $type;
+            }
+        }
+
+        ksort($types);
+        return array_values($types);
+    }
+
+    private function managerStaffHandled($documentId, $departmentId)
+    {
+        return $this->documentModel->departmentHandledDocumentByOtherUser($documentId, $departmentId, (int) $_SESSION['user_id']);
+    }
+
+    private function managerHasAcknowledged($documentId, $departmentId)
+    {
+        return $this->documentModel->userHandledDocument(
+            $documentId,
+            $departmentId,
+            (int) $_SESSION['user_id'],
+            ['Manager Received', 'Cleared THRU', 'Noted CC', 'Forwarded']
+        );
+    }
+
+    private function managerHasSpecificAction($documentId, $departmentId, $action)
+    {
+        return $this->documentModel->userHandledDocument(
+            $documentId,
+            $departmentId,
+            (int) $_SESSION['user_id'],
+            [$action]
+        );
+    }
+
+    private function parseActionInstructions($instructions)
+    {
+        $details = [
+            'urgent' => 'No',
+            'action' => '',
+            'deadline' => '',
+            'instruction' => ''
+        ];
+
+        foreach (preg_split('/\\r\\n|\\r|\\n/', (string) $instructions) as $line) {
+            if (strpos($line, 'Urgent: ') === 0) {
+                $details['urgent'] = trim(substr($line, 8));
+            } elseif (strpos($line, 'Action: ') === 0) {
+                $details['action'] = trim(substr($line, 8));
+            } elseif (strpos($line, 'Deadline: ') === 0) {
+                $details['deadline'] = trim(substr($line, 10));
+            } elseif (strpos($line, 'Instruction: ') === 0) {
+                $details['instruction'] = trim(substr($line, 13));
+            }
+        }
+
+        return $details;
+    }
+
+    private function requireValidCsrfPost()
+    {
+        requirePost();
+        validateCsrfOrFail();
+    }
+
+    private function documentFormDefaults()
+    {
+        return [
+            'title' => '',
+            'particulars' => '',
+            'type' => '',
+            'reference_document_id' => '',
+            'thru_department_id' => '',
+            'to_department_ids' => [],
+            'cc_department_ids' => []
+        ];
+    }
+
+    private function forwardFormDefaults()
+    {
+        return [
+            'department_ids' => [],
+            'urgent' => 0,
+            'action_type' => '',
+            'deadline_date' => '',
+            'instruction' => ''
+        ];
+    }
+
+    private function normalizeDocumentFormValues($source)
+    {
+        return [
+            'title' => trim($source['title'] ?? ''),
+            'particulars' => trim($source['particulars'] ?? ''),
+            'type' => trim($source['type'] ?? ''),
+            'reference_document_id' => !empty($source['reference_document_id']) ? (string) ((int) $source['reference_document_id']) : '',
+            'thru_department_id' => !empty($source['thru_department_id']) ? (string) ((int) $source['thru_department_id']) : '',
+            'to_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['to_department_ids'] ?? [])))),
+            'cc_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['cc_department_ids'] ?? []))))
+        ];
+    }
+
+    private function validateDocumentFormValues($values, $currentDocumentId = null)
+    {
+        $errors = [];
+
+        if ($values['title'] === '') {
+            $errors['title'] = 'Title is required.';
+        }
+
+        if ($values['type'] === '') {
+            $errors['type'] = 'Type is required.';
+        }
+
+        $referenceDocumentId = $values['reference_document_id'] !== '' ? (int) $values['reference_document_id'] : null;
+        if ($referenceDocumentId !== null) {
+            $referenceDocument = $this->documentModel->findById($referenceDocumentId);
+
+            if (!$referenceDocument) {
+                $errors['reference_document_id'] = 'Select a valid referenced document.';
+            } elseif (!$this->documentModel->canDepartmentViewDocument($referenceDocumentId, (int) $_SESSION['department_id'])) {
+                $errors['reference_document_id'] = 'You can only reference documents visible to your department.';
+            } elseif ($currentDocumentId !== null && $referenceDocumentId === (int) $currentDocumentId) {
+                $errors['reference_document_id'] = 'A document cannot reference itself.';
+            }
+        }
+
+        $thruDepartmentId = $values['thru_department_id'] !== '' ? (int) $values['thru_department_id'] : null;
+        $toDepartmentIds = $values['to_department_ids'];
+        $ccDepartmentIds = $values['cc_department_ids'];
+
+        if (empty($toDepartmentIds)) {
+            $errors['to_department_ids'] = 'Select at least one TO department.';
+        }
+
+        if ($thruDepartmentId !== null) {
+            $toDepartmentIds = array_values(array_filter($toDepartmentIds, function ($id) use ($thruDepartmentId) {
+                return (int) $id !== $thruDepartmentId;
+            }));
+
+            $ccDepartmentIds = array_values(array_filter($ccDepartmentIds, function ($id) use ($thruDepartmentId) {
+                return (int) $id !== $thruDepartmentId;
+            }));
+        }
+
+        $ccDepartmentIds = array_values(array_filter($ccDepartmentIds, function ($id) use ($toDepartmentIds) {
+            return !in_array((int) $id, $toDepartmentIds, true);
+        }));
+
+        if (!empty($values['to_department_ids']) && empty($toDepartmentIds)) {
+            $errors['to_department_ids'] = 'TO must still contain at least one department after THRU validation.';
+        }
+
+        $allSelectedDepartments = $toDepartmentIds;
+        if ($thruDepartmentId !== null) {
+            $allSelectedDepartments[] = $thruDepartmentId;
+        }
+        $allSelectedDepartments = array_merge($allSelectedDepartments, $ccDepartmentIds);
+
+        if (!empty($allSelectedDepartments) && !$this->departmentModel->areParentDepartments($allSelectedDepartments)) {
+            $errors['to_department_ids'] = 'Routing is limited to parent departments only.';
+        }
+
+        if (!empty($errors)) {
+            throw new ValidationException('Please correct the highlighted fields.', $errors);
+        }
+
+        return [
+            'title' => $values['title'],
+            'particulars' => $values['particulars'],
+            'type' => $values['type'],
+            'reference_document_id' => $referenceDocumentId,
+            'thru_department_id' => $thruDepartmentId,
+            'to_department_ids' => $toDepartmentIds,
+            'cc_department_ids' => $ccDepartmentIds
+        ];
+    }
+
+    private function getReferenceableDocuments($excludeDocumentId = null)
+    {
+        $documents = $this->documentModel->getByDepartment((int) $_SESSION['department_id']);
+
+        if ($excludeDocumentId !== null) {
+            $documents = array_values(array_filter($documents, function ($document) use ($excludeDocumentId) {
+                return (int) ($document['id'] ?? 0) !== (int) $excludeDocumentId;
+            }));
+        }
+
+        return $documents;
+    }
+
+    private function authorizeDocumentViewOrFail($id)
+    {
+        $document = $this->documentModel->findById($id);
+        if (!$document) {
+            throw new NotFoundException('Document not found.');
+        }
+
+        $deptId = (int) $_SESSION['department_id'];
+        $allowed = $this->documentModel->canDepartmentViewDocument($id, $deptId);
+        $managerStaffHandled = $this->managerStaffHandled((int) $id, $deptId);
+
+        if ($this->isManager()) {
+            $allowed = $allowed && (
+                (int) $document['origin_department_id'] === $deptId
+                || $managerStaffHandled
+            );
+        }
+
+        if (!$allowed) {
+            throw new AuthorizationException('Unauthorized access.');
+        }
+
+        return [$document, $deptId, $managerStaffHandled];
+    }
+
+    private function ensureUploadDirectory()
+    {
+        if (!is_dir(UPLOAD_ROOT) && !@mkdir(UPLOAD_ROOT, 0775, true) && !is_dir(UPLOAD_ROOT)) {
+            throw new RuntimeException('Unable to create upload directory.');
+        }
+    }
+
+    private function generateAttachmentFilename($extension)
+    {
+        return bin2hex(random_bytes(16)) . '.' . $extension;
+    }
+
+    private function handleAttachmentUpload()
+    {
+        if (empty($_FILES['attachment']['name'])) {
+            return null;
+        }
+
+        if (!isset($_FILES['attachment']['error']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'File upload failed. Please try again.']);
+        }
+
+        if (($_FILES['attachment']['size'] ?? 0) > 10 * 1024 * 1024) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment exceeds the 10 MB limit.']);
+        }
+
+        $tmpPath = $_FILES['attachment']['tmp_name'] ?? '';
+        if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Invalid uploaded file.']);
+        }
+
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mimeType = $finfo->file($tmpPath);
+        $allowedMimeTypes = [
+            'application/pdf' => 'pdf'
+        ];
+
+        if (!isset($allowedMimeTypes[$mimeType])) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Only PDF attachments are allowed.']);
+        }
+
+        $extension = strtolower(pathinfo($_FILES['attachment']['name'], PATHINFO_EXTENSION));
+        if ($extension !== $allowedMimeTypes[$mimeType]) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment file extension does not match the uploaded content.']);
+        }
+
+        $this->ensureUploadDirectory();
+        $filename = $this->generateAttachmentFilename($allowedMimeTypes[$mimeType]);
+        $uploadPath = rtrim(UPLOAD_ROOT, '/\\') . DIRECTORY_SEPARATOR . $filename;
+
+        if (!move_uploaded_file($tmpPath, $uploadPath)) {
+            throw new RuntimeException('Failed to move uploaded file.');
+        }
+
+        return $filename;
+    }
+
+    private function resolveAttachmentPath($filename)
+    {
+        $safeFilename = basename((string) $filename);
+        $candidates = [
+            rtrim(UPLOAD_ROOT, '/\\') . DIRECTORY_SEPARATOR . $safeFilename,
+            rtrim(LEGACY_UPLOAD_ROOT, '/\\') . DIRECTORY_SEPARATOR . $safeFilename
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+
+    private function replaceForwardedDepartmentIdsWithCodes($remarks, $departmentCodeMap)
+    {
+        $prefix = 'Document forwarded to department IDs: ';
+        if (strpos($remarks, $prefix) !== 0) {
+            return $remarks;
+        }
+
+        $parts = preg_split('/\\r\\n|\\r|\\n/', (string) $remarks);
+        $ids = array_filter(array_map('trim', explode(',', substr($parts[0], strlen($prefix)))));
+        $codes = [];
+
+        foreach ($ids as $id) {
+            $codes[] = $departmentCodeMap[(int) $id] ?? $id;
+        }
+
+        $parts[0] = 'Document forwarded to departments: ' . implode(', ', $codes);
+        return implode("\n", $parts);
+    }
+    private function filterManagerVisibleDocuments($documents, $departmentId)
+    {
+        if (!$this->isManager()) {
+            return $documents;
+        }
+
+        return array_values(array_filter($documents, function ($document) use ($departmentId) {
+            return (int) $document['origin_department_id'] === (int) $departmentId
+                || $this->documentModel->departmentHandledDocumentByOtherUser((int) $document['id'], (int) $departmentId, (int) $_SESSION['user_id']);
+        }));
+    }
+
+    private function notifyDocumentRouteDepartments($documentId, $title, $message, $departmentIds = null)
+    {
+        if ($departmentIds === null) {
+            $routing = $this->documentModel->getRoutingByDocument($documentId);
+            $departmentIds = [];
+
+            foreach (['THRU', 'TO', 'CC', 'DELEGATE'] as $routeType) {
+                foreach ($routing[$routeType] ?? [] as $route) {
+                    $departmentIds[] = (int) $route['department_id'];
+                }
+            }
+        }
+
+        $this->notificationModel->notifyDepartmentStaffUsers(
+            $departmentIds,
+            $title,
+            $message,
+            '/documents/show/' . $documentId,
+            (int) $_SESSION['user_id']
+        );
+    }
+
+    private function getRouteDepartmentIdsByTypes($documentId, $types, $excludeDepartmentIds = [])
+    {
+        $routing = $this->documentModel->getRoutingByDocument($documentId);
+        $departmentIds = [];
+        $types = array_values(array_unique($types));
+        $excludeDepartmentIds = array_map('intval', $excludeDepartmentIds);
+
+        foreach ($types as $routeType) {
+            foreach ($routing[$routeType] ?? [] as $route) {
+                $departmentId = (int) $route['department_id'];
+                if (in_array($departmentId, $excludeDepartmentIds, true)) {
+                    continue;
+                }
+                $departmentIds[$departmentId] = $departmentId;
+            }
+        }
+
+        return array_values($departmentIds);
+    }
+
+    private function findOwnedDraftOrFail($id)
+    {
+        $document = $this->documentModel->findById((int) $id);
+        if (!$document) {
+            throw new NotFoundException('Document not found.');
+        }
+
+        if ((int) $document['origin_department_id'] !== (int) $_SESSION['department_id']) {
+            throw new AuthorizationException('Unauthorized action.');
+        }
+
+        if (($document['status'] ?? '') !== 'Draft') {
+            throw new ValidationException('Only draft documents can be edited.');
+        }
+
+        return $document;
+    }
+
+    private function renderCreateForm()
+    {
+        $state = pullFormState('document_create', $this->documentFormDefaults());
+        $departments = $this->departmentModel->getParentDepartments();
+        $documentData = [
+            'title' => $state['values']['title'] ?? '',
+            'particulars' => $state['values']['particulars'] ?? '',
+            'type' => $state['values']['type'] ?? '',
+            'reference_document_id' => $state['values']['reference_document_id'] ?? ''
+        ];
+        $referenceDocuments = $this->getReferenceableDocuments();
+        $selectedThruDepartmentId = (int) ($state['values']['thru_department_id'] ?? 0);
+        $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
+        $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
+        $submitLabel = 'Create Document';
+        $formAction = URLROOT . '/documents/store';
+        $cancelUrl = URLROOT . '/documents';
+        $showAttachmentHint = false;
+        $errors = $state['errors'];
+        $formMessage = $state['message'];
         require_once '../app/views/documents/create.php';
     }
 
-
-
-    /* ============================
-       STORE DOCUMENT
-    ============================ */
-    public function store()
+    private function renderEditForm($document)
     {
-        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+        $routing = $this->documentModel->getRoutingByDocument((int) $document['id']);
+        $defaults = [
+            'title' => $document['title'] ?? '',
+            'particulars' => $document['particulars'] ?? '',
+            'type' => $document['type'] ?? '',
+            'reference_document_id' => !empty($document['reference_document_id']) ? (string) ((int) $document['reference_document_id']) : '',
+            'thru_department_id' => !empty($routing['THRU'][0]['department_id']) ? (string) ((int) $routing['THRU'][0]['department_id']) : '',
+            'to_department_ids' => array_map(function ($route) {
+                return (int) $route['department_id'];
+            }, $routing['TO'] ?? []),
+            'cc_department_ids' => array_map(function ($route) {
+                return (int) $route['department_id'];
+            }, $routing['CC'] ?? [])
+        ];
+        $state = pullFormState('document_edit_' . (int) $document['id'], $defaults);
+        $departments = $this->departmentModel->getParentDepartments();
+        $documentData = [
+            'title' => $state['values']['title'] ?? '',
+            'particulars' => $state['values']['particulars'] ?? '',
+            'type' => $state['values']['type'] ?? '',
+            'reference_document_id' => $state['values']['reference_document_id'] ?? ''
+        ];
+        $referenceDocuments = $this->getReferenceableDocuments((int) $document['id']);
+        $selectedThruDepartmentId = (int) ($state['values']['thru_department_id'] ?? 0);
+        $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
+        $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
+        $formAction = URLROOT . '/documents/update/' . (int) $document['id'];
+        $submitLabel = 'Save Changes';
+        $cancelUrl = URLROOT . '/documents/show/' . (int) $document['id'];
+        $showAttachmentHint = true;
+        $errors = $state['errors'];
+        $formMessage = $state['message'];
+        require_once '../app/views/documents/edit.php';
+    }
 
-            // -----------------------------
-            // Handle File Upload
-            // -----------------------------
-            $filename = null;
+    private function ensureForwardableDocument($document)
+    {
+        $currentDepartmentId = (int) $_SESSION['department_id'];
 
-            if (!empty($_FILES['attachment']['name'])) {
+        if (!$this->isManager()) {
+            throw new AuthorizationException('Only managers can forward documents.');
+        }
 
-                $filename = time() . '_' . basename($_FILES['attachment']['name']);
+        if (!$document) {
+            throw new NotFoundException('Document not found.');
+        }
 
-                // Absolute path to uploads folder
-                $uploadPath = dirname(__DIR__, 2) . '/public/uploads/' . $filename;
+        if (!$this->managerStaffHandled((int) $document['id'], $currentDepartmentId) || !$this->managerHasAcknowledged((int) $document['id'], $currentDepartmentId)) {
+            throw new ValidationException('The manager must receive the document after staff receipt before forwarding.');
+        }
 
-                if (!move_uploaded_file($_FILES['attachment']['tmp_name'], $uploadPath)) {
-                    die('File upload failed.');
+        $routeRole = $this->documentModel->getDepartmentRouteRole((int) $document['id'], $currentDepartmentId);
+        $hasDelegatedChild = $this->documentModel->hasDelegatedToChild((int) $document['id'], $currentDepartmentId);
+
+        $canForwardViaRouting = !$hasDelegatedChild
+            && $routeRole
+            && in_array($routeRole['route_type'], ['TO', 'DELEGATE'], true)
+            && ((int) $routeRole['is_cleared'] === 1);
+
+        $canForwardLegacy = !$hasDelegatedChild
+            && !$routeRole
+            && (int) $document['destination_department_id'] === $currentDepartmentId
+            && $document['status'] === 'Received';
+
+        if (!$canForwardViaRouting && !$canForwardLegacy) {
+            throw new AuthorizationException('Unauthorized action.');
+        }
+    }
+
+    private function renderForwardForm($document)
+    {
+        $state = pullFormState('document_forward_' . (int) $document['id'], $this->forwardFormDefaults());
+        $departments = $this->departmentModel->getForwardTargetsForParent((int) $_SESSION['department_id']);
+        $formValues = $state['values'];
+        $errors = $state['errors'];
+        $formMessage = $state['message'];
+        require_once '../app/views/documents/forward.php';
+    }
+
+    public function index()
+    {
+        try {
+            $department_id = (int) $_SESSION['department_id'];
+            $filters = $this->getListFilters();
+
+            if ($this->hasFilters($filters)) {
+                $documents = $this->documentModel->search($department_id, $filters);
+            } else {
+                $documents = $this->documentModel->getAllByDepartment($department_id);
+            }
+
+            $documents = $this->filterManagerVisibleDocuments($documents, $department_id);
+
+            $statusCounts = [
+                'Draft' => 0,
+                'Released' => 0,
+                'Received' => 0
+            ];
+
+            foreach ($documents as $document) {
+                if (isset($statusCounts[$document['status']])) {
+                    $statusCounts[$document['status']]++;
                 }
             }
 
-            // -----------------------------
-            // Prepare Data
-            // -----------------------------
             $data = [
-                'title' => $_POST['title'],
-                'type' => $_POST['type'],
-                'origin_department_id' => $_SESSION['department_id'],
-                'destination_department_id' => $_POST['destination_department_id'],
-                'created_by' => $_SESSION['user_id'],
-                'attachment' => $filename   // <-- Added
+                'documents' => $documents,
+                'filters' => $filters,
+                'types' => $this->extractTypes($documents),
+                'status_counts' => $statusCounts,
+                'total_documents' => count($documents)
             ];
 
-            // Create document
-            $prefix = $this->documentModel->createDocument($data);
-
-            header('Location: ' . URLROOT . '/documents');
-            exit;
+            $this->view('documents/index', $data);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.index', 'user_id' => $_SESSION['user_id'] ?? null]);
+            flash('error', 'We could not load documents right now.', 'error');
+            redirect('/dashboard', 303);
         }
     }
 
-    /* ============================
-       RELEASE DOCUMENT
-    ============================ */
+    public function outgoing()
+    {
+        try {
+            $departmentId = (int) $_SESSION['department_id'];
+            $filters = $this->getListFilters();
+            $documents = $this->documentModel->getOutgoingByDepartment($departmentId, $filters);
+
+            $data = [
+                'title' => 'Outgoing Documents',
+                'documents' => $documents,
+                'filters' => $filters,
+                'types' => $this->extractTypes($this->documentModel->getOutgoingByDepartment($departmentId)),
+                'empty_message' => 'No outgoing documents found.'
+            ];
+
+            $this->view('documents/outgoing', $data);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.outgoing', 'user_id' => $_SESSION['user_id'] ?? null]);
+            flash('error', 'We could not load outgoing documents right now.', 'error');
+            redirect('/documents', 303);
+        }
+    }
+
+    public function incoming()
+    {
+        try {
+            $departmentId = (int) $_SESSION['department_id'];
+            $filters = $this->getListFilters();
+            $documents = $this->documentModel->getIncomingByDepartment($departmentId, $filters);
+            $documents = $this->filterManagerVisibleDocuments($documents, $departmentId);
+
+            $data = [
+                'title' => 'Incoming Documents',
+                'documents' => $documents,
+                'filters' => $filters,
+                'types' => $this->extractTypes($this->filterManagerVisibleDocuments($this->documentModel->getIncomingByDepartment($departmentId), $departmentId)),
+                'empty_message' => 'No incoming documents found.'
+            ];
+
+            $this->view('documents/incoming', $data);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.incoming', 'user_id' => $_SESSION['user_id'] ?? null]);
+            flash('error', 'We could not load incoming documents right now.', 'error');
+            redirect('/documents', 303);
+        }
+    }
+
+    public function create()
+    {
+        try {
+            $this->renderCreateForm();
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.create']);
+            flash('error', 'We could not open the document form right now.', 'error');
+            redirect('/documents', 303);
+        }
+    }
+
+    public function edit($id)
+    {
+        try {
+            $this->renderEditForm($this->findOwnedDraftOrFail((int) $id));
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to edit that document.', 'error');
+            redirect('/documents', 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . (int) $id, 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.edit', 'document_id' => (int) $id]);
+            flash('error', 'We could not open that draft right now.', 'error');
+            redirect('/documents', 303);
+        }
+    }
+
+    public function store()
+    {
+        $values = $this->normalizeDocumentFormValues($_POST);
+
+        try {
+            $this->requireValidCsrfPost();
+            $routingInput = $this->validateDocumentFormValues($values);
+            $filename = $this->handleAttachmentUpload();
+
+            $this->documentModel->createDocument([
+                'title' => $routingInput['title'],
+                'particulars' => $routingInput['particulars'],
+                'type' => $routingInput['type'],
+                'origin_department_id' => (int) $_SESSION['department_id'],
+                'destination_department_id' => $routingInput['to_department_ids'][0],
+                'reference_document_id' => $routingInput['reference_document_id'],
+                'thru_department_id' => $routingInput['thru_department_id'],
+                'to_department_ids' => $routingInput['to_department_ids'],
+                'cc_department_ids' => $routingInput['cc_department_ids'],
+                'created_by' => (int) $_SESSION['user_id'],
+                'attachment' => $filename
+            ]);
+
+            flash('success', 'Document created successfully.', 'success');
+            redirect('/documents', 303);
+        } catch (ValidationException $e) {
+            storeFormState('document_create', $values, $e->getErrors(), $e->getMessage());
+            redirect('/documents/create', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.store', 'user_id' => $_SESSION['user_id'] ?? null]);
+            storeFormState('document_create', $values, [], 'We could not save the document right now. Please try again.');
+            redirect('/documents/create', 303);
+        }
+    }
+
+    public function update($id)
+    {
+        $documentId = (int) $id;
+        $values = $this->normalizeDocumentFormValues($_POST);
+
+        try {
+            $this->requireValidCsrfPost();
+            $this->findOwnedDraftOrFail($documentId);
+            $routingInput = $this->validateDocumentFormValues($values, $documentId);
+            $filename = $this->handleAttachmentUpload();
+
+            $data = [
+                'title' => $routingInput['title'],
+                'particulars' => $routingInput['particulars'],
+                'type' => $routingInput['type'],
+                'reference_document_id' => $routingInput['reference_document_id'],
+                'thru_department_id' => $routingInput['thru_department_id'],
+                'to_department_ids' => $routingInput['to_department_ids'],
+                'cc_department_ids' => $routingInput['cc_department_ids'],
+                'updated_by' => (int) $_SESSION['user_id']
+            ];
+
+            if ($filename !== null) {
+                $data['attachment'] = $filename;
+            }
+
+            $this->documentModel->updateDraftDocument($documentId, $data);
+
+            flash('success', 'Draft updated successfully.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            storeFormState('document_edit_' . $documentId, $values, $e->getErrors(), $e->getMessage());
+            redirect('/documents/edit/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to edit that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.update', 'document_id' => $documentId]);
+            storeFormState('document_edit_' . $documentId, $values, [], 'We could not save your changes right now. Please try again.');
+            redirect('/documents/edit/' . $documentId, 303);
+        }
+    }
+
     public function release($id)
     {
-        $document = $this->documentModel->findById($id);
+        $documentId = (int) $id;
 
-        if(!$document) {
-            die("Document not found.");
+        try {
+            $this->requireValidCsrfPost();
+            $document = $this->findOwnedDraftOrFail($documentId);
+
+            $this->documentModel->releaseDocument($documentId, $_SESSION['user_id'], $_SESSION['department_id']);
+            $initialDepartmentIds = $this->getRouteDepartmentIdsByTypes($documentId, ['THRU']);
+            if (empty($initialDepartmentIds)) {
+                $initialDepartmentIds = $this->getRouteDepartmentIdsByTypes($documentId, ['TO', 'CC', 'DELEGATE']);
+            }
+
+            $this->notifyDocumentRouteDepartments(
+                $documentId,
+                'Document released',
+                $document['prefix'] . ' has been released.',
+                $initialDepartmentIds
+            );
+
+            flash('success', 'Document released successfully.', 'success');
+            redirect('/documents', 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to release that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.release', 'document_id' => $documentId]);
+            flash('error', 'We could not release that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
         }
-
-        // Only origin department can release
-        if($document['origin_department_id'] != $_SESSION['department_id']) {
-            die("Unauthorized action.");
-        }
-
-        if($document['status'] != 'Draft') {
-            die("Only Draft documents can be released.");
-        }
-
-        $this->documentModel->releaseDocument(
-            $id,
-            $_SESSION['user_id'],
-            $_SESSION['department_id']
-        );
-
-        header('Location: ' . URLROOT . '/documents');
-        exit;
     }
 
-
-    /* ============================
-       RECEIVE DOCUMENT
-    ============================ */
     public function receive($id)
     {
-        $document = $this->documentModel->findById($id);
+        $documentId = (int) $id;
 
-        if (!$document) {
-            die("Document not found.");
+        try {
+            $this->requireValidCsrfPost();
+
+            if ($this->isManager()) {
+                throw new ValidationException('Managers must wait for staff receipt before acting on a document.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $deptId = (int) $_SESSION['department_id'];
+            $route = $this->documentModel->getDepartmentRouteRole($documentId, $deptId);
+
+            if ($route) {
+                if ($document['status'] === 'Draft') {
+                    throw new ValidationException('Draft documents cannot be received.');
+                }
+
+                if ($route['route_type'] !== 'THRU' && !$this->documentModel->isThruCleared($documentId)) {
+                    throw new ValidationException('Document is waiting for THRU clearance.');
+                }
+            } else {
+                if ($document['status'] !== 'Released') {
+                    throw new ValidationException('Only released documents can be received.');
+                }
+
+                if ((int) $document['destination_department_id'] !== $deptId) {
+                    throw new AuthorizationException('Unauthorized action.');
+                }
+
+                if (!$this->departmentModel->isParentDepartment($deptId)) {
+                    throw new AuthorizationException('Only parent departments can perform this action.');
+                }
+            }
+
+            $this->documentModel->receiveDocument($documentId, $_SESSION['user_id'], $deptId);
+
+            $this->notificationModel->notifyDepartmentManagers(
+                [$deptId],
+                'Manager action required',
+                $document['prefix'] . ' was received by staff and is ready for manager action.',
+                '/documents/show/' . $documentId,
+                (int) $_SESSION['user_id']
+            );
+
+            if (!empty($document['created_by']) && (int) $document['created_by'] !== (int) $_SESSION['user_id']) {
+                $this->notificationModel->create((int) $document['created_by'], 'Document received', $document['prefix'] . ' has been received.', '/documents/show/' . $documentId);
+            }
+
+            flash('success', 'Document received successfully.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to receive that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.receive', 'document_id' => $documentId]);
+            flash('error', 'We could not receive that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
         }
+    }
 
-        // Only destination department can receive
-        if ($document['destination_department_id'] != $_SESSION['department_id']) {
-            die("Unauthorized action.");
+    public function managerReceive($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can perform this action.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            $deptId = (int) $_SESSION['department_id'];
+
+            if (!$document || !$this->managerStaffHandled($documentId, $deptId)) {
+                throw new ValidationException('Document is not ready for manager action.');
+            }
+
+            if (!$this->managerHasAcknowledged($documentId, $deptId)) {
+                $this->documentModel->addDocumentLog($documentId, 'Manager Received', (int) $_SESSION['user_id'], $deptId, 'Document received by manager');
+                $this->notificationModel->create((int) $document['created_by'], 'Manager received document', $document['prefix'] . ' was received by the manager.', '/documents/show/' . $documentId);
+            }
+
+            flash('success', 'Manager receipt recorded.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to perform that action.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.managerReceive', 'document_id' => $documentId]);
+            flash('error', 'We could not record manager receipt right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
         }
+    }
 
-        if ($document['status'] !== 'Released') {
-            die("Only Released documents can be received.");
+    public function clearThru($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can perform this action.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            $deptId = (int) $_SESSION['department_id'];
+            $route = $this->documentModel->getDepartmentRouteRole($documentId, $deptId);
+
+            if (!$document || !$route || $route['route_type'] !== 'THRU' || !$this->managerHasAcknowledged($documentId, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            if (!$this->managerHasSpecificAction($documentId, $deptId, 'Cleared THRU')) {
+                $this->documentModel->addDocumentLog($documentId, 'Cleared THRU', (int) $_SESSION['user_id'], $deptId, 'Document cleared by manager');
+                if (!empty($document['created_by'])) {
+                    $this->notificationModel->create((int) $document['created_by'], 'THRU cleared', $document['prefix'] . ' was cleared by the manager.', '/documents/show/' . $documentId);
+                }
+
+                $nextDepartmentIds = $this->getRouteDepartmentIdsByTypes($documentId, ['TO', 'CC', 'DELEGATE'], [$deptId]);
+                if (!empty($nextDepartmentIds)) {
+                    $this->notifyDocumentRouteDepartments($documentId, 'Document ready for receipt', $document['prefix'] . ' is now available for your department after THRU clearance.', $nextDepartmentIds);
+                }
+            }
+
+            flash('success', 'THRU clearance recorded.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to clear this THRU route.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.clearThru', 'document_id' => $documentId]);
+            flash('error', 'We could not clear that THRU route right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
         }
+    }
 
-        $this->documentModel->receiveDocument(
-            $id,
-            $_SESSION['user_id'],
-            $_SESSION['department_id']
-        );
+    public function noteCc($id)
+    {
+        $documentId = (int) $id;
 
-        header('Location: ' . URLROOT . '/documents/show/' . $id);
-        exit;
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can perform this action.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            $deptId = (int) $_SESSION['department_id'];
+            $route = $this->documentModel->getDepartmentRouteRole($documentId, $deptId);
+
+            if (!$document || !$route || $route['route_type'] !== 'CC' || !$this->managerHasAcknowledged($documentId, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            if (!$this->managerHasSpecificAction($documentId, $deptId, 'Noted CC')) {
+                $this->documentModel->addDocumentLog($documentId, 'Noted CC', (int) $_SESSION['user_id'], $deptId, 'Document noted by manager');
+                if (!empty($document['created_by'])) {
+                    $this->notificationModel->create((int) $document['created_by'], 'CC noted', $document['prefix'] . ' was noted by the manager.', '/documents/show/' . $documentId);
+                }
+            }
+
+            flash('success', 'CC notation recorded.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to note this CC route.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.noteCc', 'document_id' => $documentId]);
+            flash('error', 'We could not record that CC action right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
     }
 
     public function show($id)
     {
-        $document = $this->documentModel->findById($id);
+        $documentId = (int) $id;
 
-        if (!$document) {
-            die("Document not found.");
+        try {
+            [$document, $deptId, $managerStaffHandled] = $this->authorizeDocumentViewOrFail($documentId);
+
+            $logs = $this->documentModel->getDocumentLogs($documentId);
+            $departmentCodeMap = [];
+            foreach ($this->departmentModel->getAll() as $department) {
+                $departmentCodeMap[(int) $department['id']] = $department['code'];
+            }
+            foreach ($logs as &$log) {
+                $log['remarks'] = $this->replaceForwardedDepartmentIdsWithCodes((string) ($log['remarks'] ?? ''), $departmentCodeMap);
+            }
+            unset($log);
+            $routing = $this->documentModel->getRoutingByDocument($documentId);
+            $routeRole = $this->documentModel->getDepartmentRouteRole($documentId, $deptId);
+            $routeType = $routeRole['route_type'] ?? null;
+            $routeCleared = isset($routeRole['is_cleared']) ? ((int) $routeRole['is_cleared'] === 1) : false;
+            $thruCleared = $this->documentModel->isThruCleared($documentId);
+            $isParentDepartment = $this->departmentModel->isParentDepartment($deptId);
+            $hasDelegatedChild = $this->documentModel->hasDelegatedToChild($documentId, $deptId);
+            $isManager = $this->isManager();
+            $managerAcknowledged = $this->managerHasAcknowledged($documentId, $deptId);
+            $managerThruCleared = $this->managerHasSpecificAction($documentId, $deptId, 'Cleared THRU');
+            $managerCcNoted = $this->managerHasSpecificAction($documentId, $deptId, 'Noted CC');
+            $recipientActionDetails = null;
+            $referencedDocument = null;
+            $latestRecipientRoute = $this->documentModel->getLatestRouteForDepartment($documentId, $deptId);
+
+            if (!empty($document['reference_document_id']) && $this->documentModel->canDepartmentViewDocument((int) $document['reference_document_id'], $deptId)) {
+                $referencedDocument = $this->documentModel->findById((int) $document['reference_document_id']);
+            }
+
+            if ($latestRecipientRoute && !empty(trim((string) ($latestRecipientRoute['instructions'] ?? '')))) {
+                $recipientActionDetails = $this->parseActionInstructions($latestRecipientRoute['instructions']);
+                $recipientActionDetails['from_department_name'] = $latestRecipientRoute['from_department_name'] ?? '';
+            }
+
+            require_once '../app/views/documents/view.php';
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to view that document.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.show', 'document_id' => $documentId]);
+            flash('error', 'We could not load that document right now.', 'error');
+            redirect('/documents', 303);
         }
-
-        $dept_id = $_SESSION['department_id'];
-
-        // Check origin or current destination
-        $allowed = (
-            $document['origin_department_id'] == $dept_id
-            ||
-            $document['destination_department_id'] == $dept_id
-        );
-
-        // If not origin or destination, check logs (lifecycle visibility)
-        if (!$allowed) {
-            $allowed = $this->documentModel
-                            ->departmentHandledDocument($id, $dept_id);
-        }
-
-        if (!$allowed) {
-            die("Unauthorized access.");
-        }
-
-        $logs = $this->documentModel->getDocumentLogs($id);
-
-        require_once '../app/views/documents/view.php';
     }
 
-    public function releaseDocument($id, $user_id, $department_id)
+    public function download($id)
     {
+        $documentId = (int) $id;
+
         try {
-            $this->db->beginTransaction();
+            [$document] = $this->authorizeDocumentViewOrFail($documentId);
 
-            // Update document
-            $stmt = $this->db->prepare("
-                UPDATE documents
-                SET status = 'Released',
-                    released_by = :user_id,
-                    released_at = NOW()
-                WHERE id = :id
-            ");
+            if (empty($document['attachment'])) {
+                throw new NotFoundException('Attachment not found.');
+            }
 
-            $stmt->execute([
-                'id' => $id,
-                'user_id' => $user_id
-            ]);
+            $attachmentPath = $this->resolveAttachmentPath($document['attachment']);
+            if ($attachmentPath === null) {
+                throw new NotFoundException('Attachment not found.');
+            }
 
-            // Insert log
-            $log = $this->db->prepare("
-                INSERT INTO document_logs
-                (document_id, action, action_by, department_id, remarks)
-                VALUES
-                (:document_id, 'Released', :action_by, :department_id, 'Document released')
-            ");
-
-            $log->execute([
-                'document_id' => $id,
-                'action_by' => $user_id,
-                'department_id' => $department_id
-            ]);
-
-            $this->db->commit();
-
-            return true;
-
-        } catch (Exception $e) {
-            $this->db->rollBack();
-            throw $e;
+            header('Content-Type: application/pdf');
+            header('Content-Length: ' . (string) filesize($attachmentPath));
+            header('Content-Disposition: inline; filename="' . rawurlencode($document['attachment']) . '"');
+            header('X-Content-Type-Options: nosniff');
+            readfile($attachmentPath);
+            exit;
+        } catch (NotFoundException $e) {
+            flash('error', 'Attachment not found.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to download that attachment.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.download', 'document_id' => $documentId]);
+            flash('error', 'We could not open that attachment right now.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
         }
     }
 
     public function forward($id)
     {
-        $document = $this->documentModel->findById($id);
+        $documentId = (int) $id;
+        $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        $values = [
+            'department_ids' => array_values(array_unique(array_filter(array_map('intval', $_POST['department_ids'] ?? [])))),
+            'urgent' => !empty($_POST['urgent']) ? 1 : 0,
+            'action_type' => trim($_POST['action_type'] ?? ''),
+            'deadline_date' => trim($_POST['deadline_date'] ?? ''),
+            'instruction' => trim($_POST['instruction'] ?? '')
+        ];
 
-        if (!$document) {
-            die("Document not found.");
+        try {
+            $this->requireParentDepartment();
+            $document = $this->documentModel->findById($documentId);
+            $this->ensureForwardableDocument($document);
+
+            if ($requestMethod === 'POST') {
+                validateCsrfOrFail();
+
+                $errors = [];
+                $currentDepartmentId = (int) $_SESSION['department_id'];
+                $allowedActionTypes = ['For initial/signature', 'For meeting attendance', 'For coordination', 'For review/comments', 'For reference/filing', 'For appropriate action'];
+
+                if (empty($values['department_ids'])) {
+                    $errors['department_ids'] = 'Select at least one forward target.';
+                } else {
+                    foreach ($values['department_ids'] as $targetId) {
+                        if (!$this->departmentModel->isValidForwardTargetForParent($currentDepartmentId, $targetId)) {
+                            $errors['department_ids'] = 'Forward targets must be another parent department or your own child department.';
+                            break;
+                        }
+                    }
+                }
+
+                if (!in_array($values['action_type'], $allowedActionTypes, true)) {
+                    $errors['action_type'] = 'Select a valid action type.';
+                }
+
+                if ($values['deadline_date'] === '') {
+                    $errors['deadline_date'] = 'Deadline date is required.';
+                }
+
+                if ($values['instruction'] === '') {
+                    $errors['instruction'] = 'Instruction is required.';
+                }
+
+                if (!empty($errors)) {
+                    throw new ValidationException('Please correct the highlighted fields.', $errors);
+                }
+
+                $this->documentModel->forwardDocument($documentId, $values['department_ids'], $_SESSION['user_id'], $currentDepartmentId, [
+                    'urgent' => $values['urgent'],
+                    'action_type' => $values['action_type'],
+                    'deadline_date' => $values['deadline_date'],
+                    'instruction' => $values['instruction']
+                ]);
+                $this->notifyDocumentRouteDepartments($documentId, 'Document forwarded', $document['prefix'] . ' has been forwarded to your department.', $values['department_ids']);
+
+                flash('success', 'Document forwarded successfully.', 'success');
+                redirect('/documents/show/' . $documentId, 303);
+            }
+
+            $this->renderForwardForm($document);
+        } catch (ValidationException $e) {
+            if ($requestMethod === 'POST') {
+                storeFormState('document_forward_' . $documentId, $values, $e->getErrors(), $e->getMessage());
+                redirect('/documents/forward/' . $documentId, 303);
+            }
+
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to forward that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.forward', 'document_id' => $documentId, 'method' => $requestMethod]);
+            if ($requestMethod === 'POST') {
+                storeFormState('document_forward_' . $documentId, $values, [], 'We could not forward that document right now. Please try again.');
+                redirect('/documents/forward/' . $documentId, 303);
+            }
+
+            flash('error', 'We could not open the forward form right now.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
         }
-
-        // Only department that received it can forward
-        if ($document['destination_department_id'] != $_SESSION['department_id']) {
-            die("Unauthorized action.");
-        }
-
-        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-
-            $new_department_id = $_POST['department_id'];
-
-            $this->documentModel->forwardDocument(
-                $id,
-                $new_department_id,
-                $_SESSION['user_id'],
-                $_SESSION['department_id']
-            );
-
-            header('Location: ' . URLROOT . '/documents/show/' . $id);
-            exit;
-        }
-
-        $departments = $this->documentModel->getAllDepartments();
-
-        require_once '../app/views/documents/forward.php';
     }
-
 }

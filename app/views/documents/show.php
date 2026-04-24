@@ -1,38 +1,13 @@
 <?php require_once '../app/views/layout/header.php'; ?>
 
-<?php
+<div class="page-hero compact">
+    <div><h1 class="section-title" style="font-size:1.6rem;">Legacy View</h1></div>
+    <div><a href="<?php echo URLROOT; ?>/documents" class="btn btn-outline-secondary">Back to Documents</a></div>
+</div>
 
-<?php if ($_SESSION['role'] == 'custodian' 
-    && $data['document']['status'] == 'Draft'
-    && $data['document']['origin_department_id'] == $_SESSION['department_id']): ?>
-
-    <a href="/documents/release/<?= $data['document']['id']; ?>" 
-       class="btn btn-success">
-        Release Document
-    </a>
-
-<?php endif; ?>
-
-<?php if ($_SESSION['role'] == 'custodian' 
-    && $data['document']['status'] == 'Released'
-    && $data['document']['destination_department_id'] == $_SESSION['department_id']): ?>
-
-    <a href="/documents/receive/<?= $data['document']['id']; ?>" 
-       class="btn btn-primary">
-        Receive Document
-    </a>
-
-<?php endif; ?>
-
-<?php if(!empty($data['document']['attachment'])): ?>
-    <p>
-        <strong>Attachment:</strong>
-        <a href="<?php echo URLROOT . '/uploads/' . $data['document']['attachment']; ?>" 
-           target="_blank" 
-           class="btn btn-sm btn-primary">
-            Download File
-        </a>
-    </p>
-<?php endif; ?>
+<div class="instruction-card">
+    <h3>Quick Guide</h3>
+    <p>This page is a placeholder for older document screens. Return to the main documents module to continue tracking, viewing details, or managing routing actions.</p>
+</div>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

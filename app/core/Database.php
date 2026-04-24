@@ -20,7 +20,8 @@ class Database {
         try {
             $this->dbh = new PDO($dsn, $this->user, $this->pass, $options);
         } catch (PDOException $e) {
-            die($e->getMessage());
+            appLog('error', 'Database connection failed', ['message' => $e->getMessage()]);
+            throw new RuntimeException('A database error occurred. Please try again later.', 0, $e);
         }
     }
 
@@ -39,5 +40,18 @@ class Database {
     public function single() {
         $this->execute();
         return $this->stmt->fetch(PDO::FETCH_OBJ);
+    }
+
+    public function resultSet() {
+        $this->execute();
+        return $this->stmt->fetchAll(PDO::FETCH_OBJ);
+    }
+
+    public function rowCount() {
+        return $this->stmt->rowCount();
+    }
+
+    public function lastInsertId() {
+        return $this->dbh->lastInsertId();
     }
 }

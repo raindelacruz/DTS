@@ -13,7 +13,7 @@ class Controller
         if(file_exists('../app/views/' . $view . '.php')){
             require_once '../app/views/' . $view . '.php';
         } else {
-            die('View does not exist');
+            throw new RuntimeException('View does not exist: ' . $view);
         }
     }
 }
