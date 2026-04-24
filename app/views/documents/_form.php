@@ -149,9 +149,11 @@ $formMessage = $formMessage ?? '';
         </div>
         <div class="col-12">
             <label class="form-label fw-semibold" for="attachment">Attachment</label>
-            <input type="file" id="attachment" name="attachment" class="form-control <?php echo !empty($errors['attachment']) ? 'is-invalid' : ''; ?>" accept=".pdf,application/pdf">
+            <input type="file" id="attachment" name="attachment" class="form-control <?php echo !empty($errors['attachment']) ? 'is-invalid' : ''; ?>" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp">
             <?php if ($showAttachmentHint): ?>
                 <div class="form-text">Leave this blank to keep the current file attached.</div>
+            <?php else: ?>
+                <div class="form-text">Accepted formats: PDF, JPG, PNG, GIF, and WEBP.</div>
             <?php endif; ?>
             <?php if (!empty($errors['attachment'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($errors['attachment']); ?></div><?php endif; ?>
         </div>

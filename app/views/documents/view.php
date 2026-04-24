@@ -59,7 +59,7 @@ $statusClasses = [
                 </div>
             </div>
             <?php if (!empty($document['attachment'])): ?>
-                <div class="mt-4 pt-3 border-top"><a href="<?php echo URLROOT; ?>/documents/download/<?php echo $document['id']; ?>" target="_blank" class="btn btn-outline-primary">View Attached File</a></div>
+                <div class="mt-4 pt-3 border-top"><a href="<?php echo URLROOT; ?>/documents/attachment/<?php echo $document['id']; ?>" target="_blank" class="btn btn-outline-primary">View Attachment</a></div>
             <?php endif; ?>
         </div>
     </div>

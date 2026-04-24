@@ -3,6 +3,8 @@
 require_once '../app/models/Document.php';
 require_once '../app/models/Department.php';
 require_once '../app/models/Notification.php';
+require_once '../app/lib/QrCodeService.php';
+require_once '../app/lib/PdfOverlayService.php';
 
 class Documents extends Controller
 {
@@ -309,15 +311,24 @@ class Documents extends Controller
         $finfo = new finfo(FILEINFO_MIME_TYPE);
         $mimeType = $finfo->file($tmpPath);
         $allowedMimeTypes = [
-            'application/pdf' => 'pdf'
+            'application/pdf' => 'pdf',
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp'
         ];
 
         if (!isset($allowedMimeTypes[$mimeType])) {
-            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Only PDF attachments are allowed.']);
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Only PDF, JPG, PNG, GIF, and WEBP attachments are allowed.']);
         }
 
         $extension = strtolower(pathinfo($_FILES['attachment']['name'], PATHINFO_EXTENSION));
-        if ($extension !== $allowedMimeTypes[$mimeType]) {
+        $validExtensions = [$allowedMimeTypes[$mimeType]];
+        if ($mimeType === 'image/jpeg') {
+            $validExtensions[] = 'jpeg';
+        }
+
+        if (!in_array($extension, $validExtensions, true)) {
             throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment file extension does not match the uploaded content.']);
         }
 
@@ -347,6 +358,38 @@ class Documents extends Controller
         }
 
         return null;
+    }
+
+    private function detectAttachmentMimeType($attachmentPath)
+    {
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mimeType = $finfo->file($attachmentPath);
+
+        if (!is_string($mimeType) || $mimeType === '') {
+            return 'application/octet-stream';
+        }
+
+        return $mimeType;
+    }
+
+    private function getAttachmentViewerType($attachmentPath)
+    {
+        $mimeType = $this->detectAttachmentMimeType($attachmentPath);
+
+        if ($mimeType === 'application/pdf') {
+            return 'pdf';
+        }
+
+        if (strpos($mimeType, 'image/') === 0) {
+            return 'image';
+        }
+
+        return 'unsupported';
+    }
+
+    private function buildVerificationUrl($qrToken)
+    {
+        return buildUrl('/document/verify/' . rawurlencode((string) $qrToken));
     }
 
 
@@ -1030,7 +1073,7 @@ class Documents extends Controller
         }
     }
 
-    public function download($id)
+    public function attachment($id)
     {
         $documentId = (int) $id;
 
@@ -1046,7 +1089,46 @@ class Documents extends Controller
                 throw new NotFoundException('Attachment not found.');
             }
 
-            header('Content-Type: application/pdf');
+            $qrToken = $this->documentModel->ensureQrToken($documentId);
+            $verificationUrl = $this->buildVerificationUrl($qrToken);
+            $qrCodeDataUri = QrCodeService::generateSvgDataUri($verificationUrl, 4);
+            $attachmentType = $this->getAttachmentViewerType($attachmentPath);
+            $sourceUrl = URLROOT . '/documents/source/' . $documentId;
+            $previewUrl = $sourceUrl;
+
+            require_once '../app/views/documents/attachment.php';
+        } catch (NotFoundException $e) {
+            flash('error', 'Attachment not found.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to view that attachment.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.attachment', 'document_id' => $documentId]);
+            flash('error', 'We could not open that attachment right now.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function source($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            [$document] = $this->authorizeDocumentViewOrFail($documentId);
+
+            if (empty($document['attachment'])) {
+                throw new NotFoundException('Attachment not found.');
+            }
+
+            $attachmentPath = $this->resolveAttachmentPath($document['attachment']);
+            if ($attachmentPath === null) {
+                throw new NotFoundException('Attachment not found.');
+            }
+
+            $mimeType = $this->detectAttachmentMimeType($attachmentPath);
+
+            header('Content-Type: ' . $mimeType);
             header('Content-Length: ' . (string) filesize($attachmentPath));
             header('Content-Disposition: inline; filename="' . rawurlencode($document['attachment']) . '"');
             header('X-Content-Type-Options: nosniff');
@@ -1056,12 +1138,62 @@ class Documents extends Controller
             flash('error', 'Attachment not found.', 'error');
             redirect('/documents/show/' . $documentId, 303);
         } catch (AuthorizationException $e) {
-            flash('error', 'You are not allowed to download that attachment.', 'error');
+            flash('error', 'You are not allowed to view that attachment.', 'error');
             redirect('/documents', 303);
         } catch (Throwable $e) {
-            reportException($e, ['action' => 'documents.download', 'document_id' => $documentId]);
+            reportException($e, ['action' => 'documents.source', 'document_id' => $documentId]);
             flash('error', 'We could not open that attachment right now.', 'error');
             redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function download($id)
+    {
+        $this->source($id);
+    }
+
+    public function printable($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            [$document] = $this->authorizeDocumentViewOrFail($documentId);
+
+            if (empty($document['attachment'])) {
+                throw new NotFoundException('Attachment not found.');
+            }
+
+            $attachmentPath = $this->resolveAttachmentPath($document['attachment']);
+            if ($attachmentPath === null) {
+                throw new NotFoundException('Attachment not found.');
+            }
+
+            if ($this->getAttachmentViewerType($attachmentPath) !== 'pdf') {
+                throw new ValidationException('Printable PDF view is only available for PDF attachments.');
+            }
+
+            $qrToken = $this->documentModel->ensureQrToken($documentId);
+            $verificationUrl = $this->buildVerificationUrl($qrToken);
+
+            PdfOverlayService::streamStampedPdf(
+                $attachmentPath,
+                $verificationUrl,
+                basename((string) ($document['attachment'] ?? ('document-' . $documentId . '.pdf')))
+            );
+            exit;
+        } catch (NotFoundException $e) {
+            flash('error', 'Attachment not found.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to view that attachment.', 'error');
+            redirect('/documents', 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/attachment/' . $documentId, 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.printable', 'document_id' => $documentId]);
+            flash('error', 'We could not prepare that print-ready attachment right now.', 'error');
+            redirect('/documents/attachment/' . $documentId, 303);
         }
     }
 

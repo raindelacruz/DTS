@@ -93,6 +93,7 @@ CREATE TABLE `documents` (
   `title` varchar(255) NOT NULL,
   `particulars` text DEFAULT NULL,
   `attachment` varchar(255) DEFAULT NULL,
+  `qr_token` varchar(64) DEFAULT NULL,
   `type` enum('Memorandum','Special Order','Internal Memorandum','Financial Documents') NOT NULL,
   `origin_department_id` int(11) NOT NULL,
   `destination_department_id` int(11) NOT NULL,
@@ -242,6 +243,7 @@ ALTER TABLE `departments`
 ALTER TABLE `documents`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `prefix` (`prefix`),
+  ADD UNIQUE KEY `uq_documents_qr_token` (`qr_token`),
   ADD KEY `origin_department_id` (`origin_department_id`),
   ADD KEY `destination_department_id` (`destination_department_id`),
   ADD KEY `created_by` (`created_by`),

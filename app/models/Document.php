@@ -59,6 +59,21 @@ class Document
                 AFTER destination_department_id
             ");
         }
+
+        if (!$this->columnExists('documents', 'qr_token')) {
+            $this->db->exec("
+                ALTER TABLE documents
+                ADD COLUMN qr_token VARCHAR(64) DEFAULT NULL
+                AFTER attachment
+            ");
+        }
+
+        if (!$this->indexExists('documents', 'uq_documents_qr_token')) {
+            $this->db->exec("
+                ALTER TABLE documents
+                ADD UNIQUE KEY uq_documents_qr_token (qr_token)
+            ");
+        }
     }
 
     private function columnExists($table, $column)
@@ -78,6 +93,79 @@ class Document
         ]);
 
         return (int) $stmt->fetchColumn() > 0;
+    }
+
+    private function indexExists($table, $index)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = :schema_name
+            AND TABLE_NAME = :table_name
+            AND INDEX_NAME = :index_name
+        ");
+
+        $stmt->execute([
+            'schema_name' => DB_NAME,
+            'table_name' => $table,
+            'index_name' => $index
+        ]);
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    private function generateQrToken()
+    {
+        return bin2hex(random_bytes(24));
+    }
+
+    public function ensureQrToken($documentId)
+    {
+        $documentId = (int) $documentId;
+        $document = $this->findById($documentId);
+
+        if (!$document) {
+            throw new RuntimeException('Document not found.');
+        }
+
+        $existingToken = trim((string) ($document['qr_token'] ?? ''));
+        if ($existingToken !== '') {
+            return $existingToken;
+        }
+
+        do {
+            $token = $this->generateQrToken();
+            $stmt = $this->db->prepare("
+                UPDATE documents
+                SET qr_token = :qr_token
+                WHERE id = :id
+                AND (qr_token IS NULL OR qr_token = '')
+            ");
+
+            $updated = false;
+
+            try {
+                $stmt->execute([
+                    'qr_token' => $token,
+                    'id' => $documentId
+                ]);
+                $updated = $stmt->rowCount() > 0;
+            } catch (PDOException $e) {
+                if (($e->errorInfo[1] ?? null) != 1062) {
+                    throw $e;
+                }
+            }
+
+            if ($updated) {
+                return $token;
+            }
+
+            $document = $this->findById($documentId);
+            $existingToken = trim((string) ($document['qr_token'] ?? ''));
+            if ($existingToken !== '') {
+                return $existingToken;
+            }
+        } while (true);
     }
 
     private function insertRoute($documentId, $fromDepartmentId, $toDepartmentId, $routingType, $instructions = null)
@@ -443,6 +531,7 @@ class Document
                     sequence_number,
                     title,
                     particulars,
+                    qr_token,
                     type,
                     origin_department_id,
                     destination_department_id,
@@ -455,6 +544,7 @@ class Document
                     :sequence_number,
                     :title,
                     :particulars,
+                    :qr_token,
                     :type,
                     :origin_department_id,
                     :destination_department_id,
@@ -470,6 +560,7 @@ class Document
                 'sequence_number' => $newNumber,
                 'title' => $data['title'],
                 'particulars' => $data['particulars'] !== '' ? $data['particulars'] : null,
+                'qr_token' => $data['qr_token'] ?? $this->generateQrToken(),
                 'type' => $data['type'],
                 'origin_department_id' => $departmentId,
                 'destination_department_id' => $primaryDestination,
@@ -758,6 +849,23 @@ class Document
     {
         $stmt = $this->db->prepare("SELECT * FROM documents WHERE id = :id");
         $stmt->execute(['id' => $id]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    public function findByQrToken($qrToken)
+    {
+        $stmt = $this->db->prepare("
+            SELECT d.*,
+                   origin.division_name AS origin_division,
+                   destination.division_name AS destination_division
+            FROM documents d
+            JOIN departments origin ON d.origin_department_id = origin.id
+            LEFT JOIN departments destination ON d.destination_department_id = destination.id
+            WHERE d.qr_token = :qr_token
+            LIMIT 1
+        ");
+
+        $stmt->execute(['qr_token' => $qrToken]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
