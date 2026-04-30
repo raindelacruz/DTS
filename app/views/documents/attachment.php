@@ -74,38 +74,19 @@ $previewUrl = $previewUrl ?? $sourceUrl;
             min-height: calc(100vh - 140px);
             background: #2f2f2f;
             overflow: auto;
-            padding: 28px 0;
+            padding: 0;
         }
-        .attachment-pdf-pages {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-            min-height: 100%;
-        }
-        .attachment-pdf-page {
-            position: relative;
-            width: fit-content;
-            max-width: 100%;
-            background: #fff;
-            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
-        }
-        .attachment-pdf-canvas {
+        .attachment-pdf-native {
             display: block;
-            max-width: 100%;
-            height: auto;
+            width: 100%;
+            min-height: calc(100vh - 140px);
+            border: 0;
             background: #fff;
         }
-        .attachment-pdf-loading {
+        .attachment-pdf-fallback {
             padding: 48px 24px;
             text-align: center;
             color: #cbd5e1;
-            font-weight: 700;
-        }
-        .attachment-pdf-error {
-            padding: 48px 24px;
-            text-align: center;
-            color: #fecaca;
             font-weight: 700;
         }
         .attachment-image-wrap {
@@ -165,41 +146,8 @@ $previewUrl = $previewUrl ?? $sourceUrl;
             line-height: 1.5;
             text-align: center;
         }
-        .page-qr-overlay {
-            position: absolute;
-            top: calc(31% - 96px);
-            right: calc(12.5% + 48px);
-            z-index: 5;
-            width: 128px;
-            padding: 9px;
-            border: 1px solid rgba(15, 23, 42, 0.18);
-            border-radius: 14px;
-            background: rgba(255, 255, 255, 0.96);
-            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
-            text-align: center;
-            pointer-events: none;
-        }
-        .page-qr-overlay img {
-            display: block;
-            width: 100%;
-            height: auto;
-        }
-        .page-qr-overlay-label {
-            margin-top: 8px;
-            font-size: 10px;
-            line-height: 1.35;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
-        }
-
         @media (max-width: 1100px) {
             .qr-overlay {
-                top: calc(28% - 96px);
-                right: calc(8% + 48px);
-                width: 114px;
-            }
-            .page-qr-overlay {
                 top: calc(28% - 96px);
                 right: calc(8% + 48px);
                 width: 114px;
@@ -226,21 +174,8 @@ $previewUrl = $previewUrl ?? $sourceUrl;
                 overflow: visible;
                 background: #fff;
             }
-            .attachment-pdf-pages {
-                display: block;
-            }
-            .attachment-pdf-page {
-                box-shadow: none;
-                margin: 0 auto 8mm;
-                page-break-after: always;
-                break-after: page;
-            }
-            .attachment-pdf-page:last-child {
-                page-break-after: auto;
-                break-after: auto;
-            }
-            .attachment-pdf-canvas {
-                max-width: 100%;
+            .attachment-pdf-native {
+                min-height: 100vh;
             }
             .attachment-image-wrap {
                 min-height: auto;
@@ -264,21 +199,6 @@ $previewUrl = $previewUrl ?? $sourceUrl;
                 -webkit-print-color-adjust: exact;
             }
             .qr-overlay-label {
-                font-size: 7pt;
-            }
-            .page-qr-overlay {
-                position: absolute;
-                top: 56.6mm;
-                right: 30.7mm;
-                width: 33mm;
-                padding: 2.5mm;
-                border: 0.2mm solid #94a3b8;
-                box-shadow: none;
-                background: #fff;
-                print-color-adjust: exact;
-                -webkit-print-color-adjust: exact;
-            }
-            .page-qr-overlay-label {
                 font-size: 7pt;
             }
             .pdf-print-note {
@@ -321,9 +241,12 @@ $previewUrl = $previewUrl ?? $sourceUrl;
 
                 <?php if ($attachmentType === 'pdf'): ?>
                     <div class="attachment-pdf-wrap">
-                        <div id="pdf-pages" class="attachment-pdf-pages" data-source-url="<?php echo htmlspecialchars($sourceUrl, ENT_QUOTES, 'UTF-8'); ?>" data-qr-image="<?php echo htmlspecialchars($qrCodeDataUri, ENT_QUOTES, 'UTF-8'); ?>">
-                            <div class="attachment-pdf-loading">Loading PDF preview...</div>
-                        </div>
+                        <object class="attachment-pdf-native" data="<?php echo htmlspecialchars($sourceUrl, ENT_QUOTES, 'UTF-8'); ?>" type="application/pdf">
+                            <div class="attachment-pdf-fallback">
+                                Unable to preview this PDF in the browser.
+                                <a href="<?php echo htmlspecialchars($sourceUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" class="viewer-button">Open Attachment</a>
+                            </div>
+                        </object>
                     </div>
                 <?php elseif ($attachmentType === 'image'): ?>
                     <div class="attachment-image-wrap">
@@ -338,82 +261,8 @@ $previewUrl = $previewUrl ?? $sourceUrl;
             </div>
         </div>
         <?php if ($attachmentType === 'pdf'): ?>
-            <div class="pdf-print-note">Use <strong>Print With QR</strong> to print the same viewer page with the verification overlay visible.</div>
+            <div class="pdf-print-note">Use <strong>Print With QR</strong> to open the print-ready PDF with the verification QR applied.</div>
         <?php endif; ?>
     </div>
-    <?php if ($attachmentType === 'pdf'): ?>
-        <script type="module">
-            import * as pdfjsLib from '<?php echo htmlspecialchars(URLROOT . '/assets/pdfjs/pdf.min.mjs', ENT_QUOTES, 'UTF-8'); ?>';
-
-            pdfjsLib.GlobalWorkerOptions.workerSrc = '<?php echo htmlspecialchars(URLROOT . '/assets/pdfjs/pdf.worker.min.mjs', ENT_QUOTES, 'UTF-8'); ?>';
-
-            const pagesRoot = document.getElementById('pdf-pages');
-
-            if (pagesRoot) {
-                const sourceUrl = pagesRoot.dataset.sourceUrl || '';
-                const qrImage = pagesRoot.dataset.qrImage || '';
-
-                const createQrOverlay = () => {
-                    const overlay = document.createElement('div');
-                    overlay.className = 'page-qr-overlay';
-                    overlay.innerHTML = `
-                        <img src="${qrImage}" alt="Document verification QR code">
-                        <div class="page-qr-overlay-label">Scan to verify document</div>
-                    `;
-                    return overlay;
-                };
-
-                const renderPdf = async () => {
-                    try {
-                        const loadingTask = pdfjsLib.getDocument({
-                            url: sourceUrl,
-                            cMapUrl: '<?php echo htmlspecialchars(URLROOT . '/assets/pdfjs/cmaps/', ENT_QUOTES, 'UTF-8'); ?>',
-                            cMapPacked: true,
-                            standardFontDataUrl: '<?php echo htmlspecialchars(URLROOT . '/assets/pdfjs/standard_fonts/', ENT_QUOTES, 'UTF-8'); ?>'
-                        });
-                        const pdf = await loadingTask.promise;
-                        pagesRoot.innerHTML = '';
-
-                        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-                            const page = await pdf.getPage(pageNumber);
-                            const viewport = page.getViewport({ scale: 1.6 });
-                            const outputScale = window.devicePixelRatio || 1;
-                            const canvas = document.createElement('canvas');
-                            const context = canvas.getContext('2d', { alpha: false });
-                            const pageWrap = document.createElement('div');
-
-                            pageWrap.className = 'attachment-pdf-page';
-                            canvas.className = 'attachment-pdf-canvas';
-                            canvas.width = Math.floor(viewport.width * outputScale);
-                            canvas.height = Math.floor(viewport.height * outputScale);
-                            canvas.style.width = `${viewport.width}px`;
-                            canvas.style.height = `${viewport.height}px`;
-
-                            const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
-
-                            await page.render({
-                                canvasContext: context,
-                                transform,
-                                viewport
-                            }).promise;
-
-                            pageWrap.appendChild(canvas);
-
-                            if (pageNumber === 1) {
-                                pageWrap.appendChild(createQrOverlay());
-                            }
-
-                            pagesRoot.appendChild(pageWrap);
-                        }
-                    } catch (error) {
-                        console.error(error);
-                        pagesRoot.innerHTML = '<div class="attachment-pdf-error">Unable to render this PDF preview for printing.</div>';
-                    }
-                };
-
-                renderPdf();
-            }
-        </script>
-    <?php endif; ?>
 </body>
 </html>
