@@ -303,7 +303,7 @@ $previewUrl = $previewUrl ?? $sourceUrl;
                 <a href="<?php echo htmlspecialchars(URLROOT . '/documents/show/' . (int) $document['id'], ENT_QUOTES, 'UTF-8'); ?>" class="viewer-button secondary">Back</a>
                 <a href="<?php echo htmlspecialchars($sourceUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" class="viewer-button secondary">Open Original</a>
                 <?php if ($attachmentType === 'pdf'): ?>
-                    <button type="button" class="viewer-button" onclick="window.print()">Print With QR</button>
+                    <a href="<?php echo htmlspecialchars(URLROOT . '/documents/printable/' . (int) $document['id'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" class="viewer-button">Print With QR</a>
                 <?php else: ?>
                     <button type="button" class="viewer-button" onclick="window.print()">Print Attachment</button>
                 <?php endif; ?>
