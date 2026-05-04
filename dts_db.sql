@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Apr 24, 2026 at 06:13 AM
+-- Generation Time: May 04, 2026 at 05:49 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -110,6 +110,24 @@ CREATE TABLE `documents` (
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `document_attachment_history`
+--
+
+CREATE TABLE `document_attachment_history` (
+  `id` int(11) NOT NULL,
+  `document_id` int(11) NOT NULL,
+  `return_id` int(11) DEFAULT NULL,
+  `old_filename` varchar(255) DEFAULT NULL,
+  `new_filename` varchar(255) NOT NULL,
+  `uploaded_by` int(11) NOT NULL,
+  `uploaded_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `replacement_reason` text NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `document_logs`
 --
 
@@ -161,24 +179,6 @@ CREATE TABLE `document_routes` (
   `status` enum('Pending','Received','Returned') DEFAULT 'Pending',
   `routed_at` datetime DEFAULT current_timestamp(),
   `received_at` datetime DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Table structure for table `document_attachment_history`
---
-
-CREATE TABLE `document_attachment_history` (
-  `id` int(11) NOT NULL,
-  `document_id` int(11) NOT NULL,
-  `return_id` int(11) DEFAULT NULL,
-  `old_filename` varchar(255) DEFAULT NULL,
-  `new_filename` varchar(255) NOT NULL,
-  `uploaded_by` int(11) NOT NULL,
-  `uploaded_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `replacement_reason` text NOT NULL,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -237,7 +237,7 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`id`, `id_number`, `firstname`, `lastname`, `middle_initial`, `department_id`, `role`, `email`, `password`, `status`, `created_at`) VALUES
-(1, '000000', 'Rainier John', 'Dela Cruz', 'J', 12, 'admin', 'rainier.delacruz@nfa.gov.ph', '$2y$10$bls1Uxyqdv6KGFOOZl9Vl.xWxZ0AWdyUUcDEs93EYLklSBfs3QzsG', 'active', '2026-05-04 00:00:00');
+(1, '000000', 'Rainier John', 'Dela Cruz', 'J', 12, 'admin', 'rainier.delacruz@nfa.gov.ph', '$2y$10$bls1Uxyqdv6KGFOOZl9Vl.xWxZ0AWdyUUcDEs93EYLklSBfs3QzsG', 'active', '2026-05-04 01:42:44');
 
 --
 -- Indexes for dumped tables
@@ -275,6 +275,15 @@ ALTER TABLE `documents`
   ADD KEY `idx_documents_created_at` (`created_at`);
 
 --
+-- Indexes for table `document_attachment_history`
+--
+ALTER TABLE `document_attachment_history`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_document_attachment_history_document` (`document_id`),
+  ADD KEY `idx_document_attachment_history_return` (`return_id`),
+  ADD KEY `idx_document_attachment_history_active` (`document_id`,`is_active`);
+
+--
 -- Indexes for table `document_logs`
 --
 ALTER TABLE `document_logs`
@@ -290,11 +299,7 @@ ALTER TABLE `document_returns`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_document_returns_document` (`document_id`),
   ADD KEY `idx_document_returns_status` (`status`),
-  ADD KEY `idx_document_returns_route` (`route_id`),
-  ADD KEY `returned_by` (`returned_by`),
-  ADD KEY `returned_department_id` (`returned_department_id`),
-  ADD KEY `releasing_department_id` (`releasing_department_id`),
-  ADD KEY `resolved_by` (`resolved_by`);
+  ADD KEY `idx_document_returns_route` (`route_id`);
 
 --
 -- Indexes for table `document_routes`
@@ -304,16 +309,6 @@ ALTER TABLE `document_routes`
   ADD KEY `from_department_id` (`from_department_id`),
   ADD KEY `to_department_id` (`to_department_id`),
   ADD KEY `idx_routes_document` (`document_id`);
-
---
--- Indexes for table `document_attachment_history`
---
-ALTER TABLE `document_attachment_history`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `idx_document_attachment_history_document` (`document_id`),
-  ADD KEY `idx_document_attachment_history_return` (`return_id`),
-  ADD KEY `idx_document_attachment_history_active` (`document_id`,`is_active`),
-  ADD KEY `uploaded_by` (`uploaded_by`);
 
 --
 -- Indexes for table `document_sequences`
@@ -362,6 +357,12 @@ ALTER TABLE `documents`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT for table `document_attachment_history`
+--
+ALTER TABLE `document_attachment_history`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT for table `document_logs`
 --
 ALTER TABLE `document_logs`
@@ -377,12 +378,6 @@ ALTER TABLE `document_returns`
 -- AUTO_INCREMENT for table `document_routes`
 --
 ALTER TABLE `document_routes`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT for table `document_attachment_history`
---
-ALTER TABLE `document_attachment_history`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
@@ -439,31 +434,12 @@ ALTER TABLE `document_logs`
   ADD CONSTRAINT `document_logs_ibfk_3` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`);
 
 --
--- Constraints for table `document_returns`
---
-ALTER TABLE `document_returns`
-  ADD CONSTRAINT `document_returns_document_fk` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `document_returns_route_fk` FOREIGN KEY (`route_id`) REFERENCES `document_routes` (`id`) ON DELETE SET NULL,
-  ADD CONSTRAINT `document_returns_returned_by_fk` FOREIGN KEY (`returned_by`) REFERENCES `users` (`id`),
-  ADD CONSTRAINT `document_returns_returned_department_fk` FOREIGN KEY (`returned_department_id`) REFERENCES `departments` (`id`),
-  ADD CONSTRAINT `document_returns_releasing_department_fk` FOREIGN KEY (`releasing_department_id`) REFERENCES `departments` (`id`),
-  ADD CONSTRAINT `document_returns_resolved_by_fk` FOREIGN KEY (`resolved_by`) REFERENCES `users` (`id`);
-
---
 -- Constraints for table `document_routes`
 --
 ALTER TABLE `document_routes`
   ADD CONSTRAINT `document_routes_ibfk_1` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `document_routes_ibfk_2` FOREIGN KEY (`from_department_id`) REFERENCES `departments` (`id`),
   ADD CONSTRAINT `document_routes_ibfk_3` FOREIGN KEY (`to_department_id`) REFERENCES `departments` (`id`);
-
---
--- Constraints for table `document_attachment_history`
---
-ALTER TABLE `document_attachment_history`
-  ADD CONSTRAINT `document_attachment_history_document_fk` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `document_attachment_history_return_fk` FOREIGN KEY (`return_id`) REFERENCES `document_returns` (`id`) ON DELETE SET NULL,
-  ADD CONSTRAINT `document_attachment_history_uploaded_by_fk` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`);
 
 --
 -- Constraints for table `document_sequences`
