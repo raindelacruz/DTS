@@ -164,7 +164,8 @@ class Documents extends Controller
             'reference_document_id' => '',
             'thru_department_id' => '',
             'to_department_ids' => [],
-            'cc_department_ids' => []
+            'cc_department_ids' => [],
+            'delegate_department_ids' => []
         ];
     }
 
@@ -193,7 +194,8 @@ class Documents extends Controller
             'reference_document_id' => !empty($source['reference_document_id']) ? (string) ((int) $source['reference_document_id']) : '',
             'thru_department_id' => !empty($source['thru_department_id']) ? (string) ((int) $source['thru_department_id']) : '',
             'to_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['to_department_ids'] ?? [])))),
-            'cc_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['cc_department_ids'] ?? []))))
+            'cc_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['cc_department_ids'] ?? [])))),
+            'delegate_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['delegate_department_ids'] ?? []))))
         ];
     }
 
@@ -225,9 +227,11 @@ class Documents extends Controller
         $thruDepartmentId = $values['thru_department_id'] !== '' ? (int) $values['thru_department_id'] : null;
         $toDepartmentIds = $values['to_department_ids'];
         $ccDepartmentIds = $values['cc_department_ids'];
+        $delegateDepartmentIds = $values['delegate_department_ids'];
+        $originDepartmentId = (int) $_SESSION['department_id'];
 
-        if (empty($toDepartmentIds)) {
-            $errors['to_department_ids'] = 'Select at least one TO department.';
+        if (empty($toDepartmentIds) && empty($delegateDepartmentIds)) {
+            $errors['to_department_ids'] = 'Select at least one TO department or internal division.';
         }
 
         if ($thruDepartmentId !== null) {
@@ -244,7 +248,14 @@ class Documents extends Controller
             return !in_array((int) $id, $toDepartmentIds, true);
         }));
 
-        if (!empty($values['to_department_ids']) && empty($toDepartmentIds)) {
+        $delegateDepartmentIds = array_values(array_filter($delegateDepartmentIds, function ($id) use ($thruDepartmentId, $toDepartmentIds, $ccDepartmentIds) {
+            $departmentId = (int) $id;
+            return ($thruDepartmentId === null || $departmentId !== $thruDepartmentId)
+                && !in_array($departmentId, $toDepartmentIds, true)
+                && !in_array($departmentId, $ccDepartmentIds, true);
+        }));
+
+        if (!empty($values['to_department_ids']) && empty($toDepartmentIds) && empty($delegateDepartmentIds)) {
             $errors['to_department_ids'] = 'TO must still contain at least one department after THRU validation.';
         }
 
@@ -258,6 +269,10 @@ class Documents extends Controller
             $errors['to_department_ids'] = 'Routing is limited to parent departments only.';
         }
 
+        if (!empty($delegateDepartmentIds) && !$this->departmentModel->areChildDepartmentsOfParent($delegateDepartmentIds, $originDepartmentId)) {
+            $errors['delegate_department_ids'] = 'Internal routing is limited to your own child division only.';
+        }
+
         if (!empty($errors)) {
             throw new ValidationException('Please correct the highlighted fields.', $errors);
         }
@@ -269,7 +284,8 @@ class Documents extends Controller
             'reference_document_id' => $referenceDocumentId,
             'thru_department_id' => $thruDepartmentId,
             'to_department_ids' => $toDepartmentIds,
-            'cc_department_ids' => $ccDepartmentIds
+            'cc_department_ids' => $ccDepartmentIds,
+            'delegate_department_ids' => $delegateDepartmentIds
         ];
     }
 
@@ -533,6 +549,7 @@ class Documents extends Controller
     {
         $state = pullFormState('document_create', $this->documentFormDefaults());
         $departments = $this->departmentModel->getParentDepartments();
+        $childDepartments = $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -543,6 +560,7 @@ class Documents extends Controller
         $selectedThruDepartmentId = (int) ($state['values']['thru_department_id'] ?? 0);
         $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
         $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
+        $selectedDelegateDepartmentIds = array_map('intval', $state['values']['delegate_department_ids'] ?? []);
         $submitLabel = 'Create Document';
         $formAction = URLROOT . '/documents/store';
         $cancelUrl = URLROOT . '/documents';
@@ -567,10 +585,14 @@ class Documents extends Controller
             }, $routing['TO'] ?? []),
             'cc_department_ids' => array_map(function ($route) {
                 return (int) $route['department_id'];
-            }, $routing['CC'] ?? [])
+            }, $routing['CC'] ?? []),
+            'delegate_department_ids' => array_map(function ($route) {
+                return (int) $route['department_id'];
+            }, $routing['DELEGATE'] ?? [])
         ];
         $state = pullFormState('document_edit_' . (int) $document['id'], $defaults);
         $departments = $this->departmentModel->getParentDepartments();
+        $childDepartments = $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -581,6 +603,7 @@ class Documents extends Controller
         $selectedThruDepartmentId = (int) ($state['values']['thru_department_id'] ?? 0);
         $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
         $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
+        $selectedDelegateDepartmentIds = array_map('intval', $state['values']['delegate_department_ids'] ?? []);
         $formAction = URLROOT . '/documents/update/' . (int) $document['id'];
         $submitLabel = 'Save Changes';
         $cancelUrl = URLROOT . '/documents/show/' . (int) $document['id'];
@@ -796,11 +819,12 @@ class Documents extends Controller
                 'particulars' => $routingInput['particulars'],
                 'type' => $routingInput['type'],
                 'origin_department_id' => (int) $_SESSION['department_id'],
-                'destination_department_id' => $routingInput['to_department_ids'][0],
+                'destination_department_id' => $routingInput['to_department_ids'][0] ?? $routingInput['delegate_department_ids'][0],
                 'reference_document_id' => $routingInput['reference_document_id'],
                 'thru_department_id' => $routingInput['thru_department_id'],
                 'to_department_ids' => $routingInput['to_department_ids'],
                 'cc_department_ids' => $routingInput['cc_department_ids'],
+                'delegate_department_ids' => $routingInput['delegate_department_ids'],
                 'created_by' => (int) $_SESSION['user_id'],
                 'attachment' => $filename
             ]);
@@ -836,6 +860,7 @@ class Documents extends Controller
                 'thru_department_id' => $routingInput['thru_department_id'],
                 'to_department_ids' => $routingInput['to_department_ids'],
                 'cc_department_ids' => $routingInput['cc_department_ids'],
+                'delegate_department_ids' => $routingInput['delegate_department_ids'],
                 'updated_by' => (int) $_SESSION['user_id']
             ];
 

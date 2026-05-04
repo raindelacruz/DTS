@@ -392,6 +392,33 @@ class Document
         return (int) $stmt->fetchColumn() === 0;
     }
 
+    private function hasToRoute($documentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM document_routes
+            WHERE document_id = :document_id
+            AND routing_type = 'TO'
+        ");
+
+        $stmt->execute(['document_id' => $documentId]);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    private function areAllDelegateReceived($documentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM document_routes
+            WHERE document_id = :document_id
+            AND routing_type = 'DELEGATE'
+            AND status = 'Pending'
+        ");
+
+        $stmt->execute(['document_id' => $documentId]);
+        return (int) $stmt->fetchColumn() === 0;
+    }
+
     private function visibilityWhereClause()
     {
         return "
@@ -656,10 +683,11 @@ class Document
             $thruDepartmentId = !empty($data['thru_department_id']) ? (int) $data['thru_department_id'] : null;
             $toDepartmentIds = $data['to_department_ids'] ?? [];
             $ccDepartmentIds = $data['cc_department_ids'] ?? [];
+            $delegateDepartmentIds = $data['delegate_department_ids'] ?? [];
 
             $primaryDestination = !empty($toDepartmentIds)
                 ? (int) $toDepartmentIds[0]
-                : (int) $data['destination_department_id'];
+                : (!empty($delegateDepartmentIds) ? (int) $delegateDepartmentIds[0] : (int) $data['destination_department_id']);
 
             $insertDoc = $this->db->prepare("
                 INSERT INTO documents (
@@ -720,6 +748,10 @@ class Document
                 $this->insertRoute($documentId, $departmentId, (int) $ccDepartmentId, 'CC');
             }
 
+            foreach ($delegateDepartmentIds as $delegateDepartmentId) {
+                $this->insertRoute($documentId, $departmentId, (int) $delegateDepartmentId, 'DELEGATE');
+            }
+
             $log = $this->db->prepare("
                 INSERT INTO document_logs (
                     document_id,
@@ -736,7 +768,7 @@ class Document
                 )
             ");
 
-            $remarks = ($thruDepartmentId || !empty($toDepartmentIds) || !empty($ccDepartmentIds))
+            $remarks = ($thruDepartmentId || !empty($toDepartmentIds) || !empty($ccDepartmentIds) || !empty($delegateDepartmentIds))
                 ? 'Document created with routing'
                 : 'Document created';
 
@@ -775,9 +807,10 @@ class Document
             $thruDepartmentId = !empty($data['thru_department_id']) ? (int) $data['thru_department_id'] : null;
             $toDepartmentIds = array_values(array_map('intval', $data['to_department_ids'] ?? []));
             $ccDepartmentIds = array_values(array_map('intval', $data['cc_department_ids'] ?? []));
+            $delegateDepartmentIds = array_values(array_map('intval', $data['delegate_department_ids'] ?? []));
             $primaryDestination = !empty($toDepartmentIds)
                 ? (int) $toDepartmentIds[0]
-                : (int) $existingDocument['destination_department_id'];
+                : (!empty($delegateDepartmentIds) ? (int) $delegateDepartmentIds[0] : (int) $existingDocument['destination_department_id']);
             $attachment = array_key_exists('attachment', $data)
                 ? $data['attachment']
                 : $existingDocument['attachment'];
@@ -806,7 +839,7 @@ class Document
             $deleteRoutes = $this->db->prepare("
                 DELETE FROM document_routes
                 WHERE document_id = :document_id
-                AND routing_type IN ('THRU', 'TO', 'CC')
+                AND routing_type IN ('THRU', 'TO', 'CC', 'DELEGATE')
             ");
             $deleteRoutes->execute(['document_id' => $documentId]);
 
@@ -822,7 +855,11 @@ class Document
                 $this->insertRoute($documentId, $departmentId, (int) $ccDepartmentId, 'CC');
             }
 
-            $remarks = ($thruDepartmentId || !empty($toDepartmentIds) || !empty($ccDepartmentIds))
+            foreach ($delegateDepartmentIds as $delegateDepartmentId) {
+                $this->insertRoute($documentId, $departmentId, (int) $delegateDepartmentId, 'DELEGATE');
+            }
+
+            $remarks = ($thruDepartmentId || !empty($toDepartmentIds) || !empty($ccDepartmentIds) || !empty($delegateDepartmentIds))
                 ? 'Draft document updated with routing'
                 : 'Draft document updated';
 
@@ -927,7 +964,10 @@ class Document
                     'remarks' => $remarks
                 ]);
 
-                if ($route['route_type'] === 'TO' && $this->areAllToReceived($id)) {
+                $allPrimaryRoutesReceived = ($route['route_type'] === 'TO' && $this->areAllToReceived($id))
+                    || ($route['route_type'] === 'DELEGATE' && !$this->hasToRoute($id) && $this->areAllDelegateReceived($id));
+
+                if ($allPrimaryRoutesReceived) {
                     $markDoc = $this->db->prepare("
                         UPDATE documents
                         SET status = 'Received',

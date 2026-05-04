@@ -102,8 +102,9 @@ The user opens Create Document and enters:
 - Particulars
 - Optional document reference
 - Optional THRU department
-- One or more TO departments
+- One or more TO departments, unless routing only to an own child division
 - Optional CC departments
+- Optional own child division for internal routing
 - Optional attachment
 
 System behavior:
@@ -111,18 +112,48 @@ System behavior:
 - Prefix is generated from department code, year, month, and sequence.
 - Document status is saved as `Draft`.
 - Routes are inserted into `document_routes`.
+- Parent department recipients are stored as `THRU`, `TO`, or `CC`.
+- The originating department's own child division recipients are stored as `DELEGATE`.
 - A `Created` entry is inserted into `document_logs`.
 
 Creation controls:
 
 - Title is required.
 - Type is required.
-- At least one TO department is required.
-- Selected routing departments at creation must be parent departments.
+- At least one TO department or one valid own child division is required.
+- THRU, TO, and CC routing departments at creation must be parent departments.
+- Internal division routing is limited to direct child divisions of the originating department.
 - THRU department is removed from TO and CC if duplicated.
 - CC departments duplicated in TO are removed from CC.
+- Internal child division selections duplicated in THRU, TO, or CC are removed from the internal route list.
 - Optional reference document must exist and be visible to the creator's department.
 - A document cannot reference itself during draft editing.
+
+### 5.2.1 Origin Department Internal Division Routing
+
+An originating parent department may release a document directly to its own child division during initial document creation and draft editing.
+
+Allowed creation targets:
+
+- Parent departments through the existing THRU, TO, and CC fields.
+- The originating department's own child division through the Own Division field.
+
+Disallowed creation targets:
+
+- Child divisions of other parent departments.
+- Unrelated offices.
+- Missing or invalid department records.
+
+Internal child-division routes use the existing `DELEGATE` route type. This keeps the initial release workflow aligned with the existing forwarding workflow, where a parent department manager delegates a routed document to the parent's own child division.
+
+Release and receiving behavior:
+
+- If the document has a THRU route, THRU recipients are notified first.
+- After THRU clearance, TO, CC, and DELEGATE recipients become available.
+- If the document has no THRU route, TO, CC, and DELEGATE recipients are notified on release.
+- Child division staff receive the document through the normal routed receiving workflow.
+- The originating department sees the document as the origin office.
+- The child division sees the document through its DELEGATE route.
 
 ### 5.3 Draft Editing
 
@@ -140,6 +171,7 @@ Editable fields:
 System behavior:
 
 - Existing THRU, TO, and CC routes are replaced.
+- Existing DELEGATE routes created during draft routing are replaced.
 - Existing attachment is kept if no new file is uploaded.
 - A `Draft Updated` log is added.
 
@@ -183,7 +215,7 @@ System behavior:
 - `released_by` and `released_at` are set.
 - A `Released` timeline log is added.
 - If THRU routes exist, THRU recipients are notified first.
-- If no THRU route exists, TO, CC, and DELEGATE route recipients are notified.
+- If no THRU route exists, TO, CC, and DELEGATE route recipients are notified, including own child divisions selected during creation.
 
 ### 5.6 Receiving and Validation by Receiving Office
 
@@ -393,9 +425,11 @@ Document field controls:
 
 Routing controls:
 
-- Creation routing is limited to parent departments.
+- Creation THRU, TO, and CC routing is limited to parent departments.
+- Creation internal division routing is limited to direct child divisions of the originating department and is stored as `DELEGATE`.
 - THRU cannot also remain in TO or CC.
 - CC cannot duplicate TO.
+- Internal child division selections cannot duplicate THRU, TO, or CC.
 - THRU must be received or cleared before TO, CC, and DELEGATE receipt.
 - Forwarding targets are limited to another parent department or the manager's own child department.
 - Parent department is required for forwarding.
@@ -487,9 +521,11 @@ Return records are tracked in `document_returns`, including:
 | Admin deactivates own account | Action is blocked. |
 | Duplicate registration ID or email | Registration is rejected. |
 | Missing document title or type | Create or edit form is rejected. |
-| Missing TO department | Create or edit form is rejected. |
-| THRU removes all TO recipients | Validation requires TO to still contain at least one department. |
-| Non-parent department selected during creation routing | Validation rejects the route. |
+| Missing TO department and missing internal division | Create or edit form is rejected. |
+| THRU removes all TO recipients and no internal division remains | Validation requires at least one routable recipient. |
+| Non-parent department selected in THRU, TO, or CC during creation routing | Validation rejects the route. |
+| Child division of another department selected for internal creation routing | Validation rejects the route. |
+| Own child division selected during creation routing | Route is saved as DELEGATE and follows normal release, THRU clearance, receiving, return, and tracking rules. |
 | Invalid reference document | Validation rejects the reference. |
 | Draft receive attempt | Receive is blocked. |
 | Returned document receive attempt | Receive is blocked until corrected and re-released. |

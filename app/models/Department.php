@@ -60,6 +60,19 @@ class Department
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    public function getChildDepartmentsForParent($parent_department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT *
+            FROM departments
+            WHERE parent_id = :parent_department_id
+            ORDER BY division_name ASC
+        ");
+
+        $stmt->execute(['parent_department_id' => $parent_department_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function isParentDepartment($department_id)
     {
         $stmt = $this->db->prepare("
@@ -90,6 +103,33 @@ class Department
         ");
 
         $stmt->execute($department_ids);
+
+        return (int) $stmt->fetchColumn() === count($department_ids);
+    }
+
+    public function areChildDepartmentsOfParent($department_ids = [], $parent_department_id = null)
+    {
+        $department_ids = array_values(array_unique(array_filter(array_map('intval', $department_ids))));
+
+        if (empty($department_ids)) {
+            return true;
+        }
+
+        if ($parent_department_id === null || !$this->isParentDepartment((int) $parent_department_id)) {
+            return false;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($department_ids), '?'));
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM departments
+            WHERE id IN ($placeholders)
+            AND parent_id = ?
+        ");
+
+        $params = $department_ids;
+        $params[] = (int) $parent_department_id;
+        $stmt->execute($params);
 
         return (int) $stmt->fetchColumn() === count($department_ids);
     }
