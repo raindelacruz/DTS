@@ -19,6 +19,7 @@
     $submitLabel = $submitLabel ?? 'Create Document';
     $cancelUrl = $cancelUrl ?? (URLROOT . '/documents');
     $showAttachmentHint = $showAttachmentHint ?? false;
+    $nextPrefix = $nextPrefix ?? '';
     require '../app/views/documents/_form.php';
     ?>
 </div>

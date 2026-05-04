@@ -74,6 +74,22 @@ class Document
                 ADD UNIQUE KEY uq_documents_qr_token (qr_token)
             ");
         }
+
+        if (!$this->enumColumnIncludes('documents', 'status', 'Returned') || !$this->enumColumnIncludes('documents', 'status', 'Re-released')) {
+            $this->db->exec("
+                ALTER TABLE documents
+                MODIFY status ENUM('Draft','Released','Received','Returned','Re-released') DEFAULT 'Draft'
+            ");
+        }
+
+        if (!$this->enumColumnIncludes('document_routes', 'status', 'Returned')) {
+            $this->db->exec("
+                ALTER TABLE document_routes
+                MODIFY status ENUM('Pending','Received','Returned') DEFAULT 'Pending'
+            ");
+        }
+
+        $this->ensureReturnTables();
     }
 
     private function columnExists($table, $column)
@@ -112,6 +128,70 @@ class Document
         ]);
 
         return (int) $stmt->fetchColumn() > 0;
+    }
+
+    private function enumColumnIncludes($table, $column, $value)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COLUMN_TYPE
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = :schema_name
+            AND TABLE_NAME = :table_name
+            AND COLUMN_NAME = :column_name
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'schema_name' => DB_NAME,
+            'table_name' => $table,
+            'column_name' => $column
+        ]);
+
+        $columnType = (string) $stmt->fetchColumn();
+        return strpos($columnType, "'" . str_replace("'", "''", $value) . "'") !== false;
+    }
+
+    private function ensureReturnTables()
+    {
+        $this->db->exec("
+            CREATE TABLE IF NOT EXISTS document_returns (
+                id INT(11) NOT NULL AUTO_INCREMENT,
+                document_id INT(11) NOT NULL,
+                route_id INT(11) DEFAULT NULL,
+                returned_by INT(11) NOT NULL,
+                returned_department_id INT(11) NOT NULL,
+                releasing_department_id INT(11) NOT NULL,
+                return_reason VARCHAR(150) NOT NULL,
+                attachment_issue VARCHAR(80) DEFAULT NULL,
+                remarks TEXT NOT NULL,
+                status ENUM('Open','Resolved') NOT NULL DEFAULT 'Open',
+                returned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                resolved_at DATETIME DEFAULT NULL,
+                resolved_by INT(11) DEFAULT NULL,
+                PRIMARY KEY (id),
+                KEY idx_document_returns_document (document_id),
+                KEY idx_document_returns_status (status),
+                KEY idx_document_returns_route (route_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        $this->db->exec("
+            CREATE TABLE IF NOT EXISTS document_attachment_history (
+                id INT(11) NOT NULL AUTO_INCREMENT,
+                document_id INT(11) NOT NULL,
+                return_id INT(11) DEFAULT NULL,
+                old_filename VARCHAR(255) DEFAULT NULL,
+                new_filename VARCHAR(255) NOT NULL,
+                uploaded_by INT(11) NOT NULL,
+                uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                replacement_reason TEXT NOT NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                PRIMARY KEY (id),
+                KEY idx_document_attachment_history_document (document_id),
+                KEY idx_document_attachment_history_return (return_id),
+                KEY idx_document_attachment_history_active (document_id, is_active)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
     }
 
     private function generateQrToken()
@@ -231,6 +311,42 @@ class Document
             'Instruction: ' . $instruction
         ]);
     }
+
+    public function getNextPrefix($departmentId)
+    {
+        $departmentId = (int) $departmentId;
+
+        $stmt = $this->db->prepare("SELECT code FROM departments WHERE id = :department_id");
+        $stmt->execute(['department_id' => $departmentId]);
+        $department = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$department) {
+            throw new Exception('Invalid Department.');
+        }
+
+        $year = date('Y');
+        $month = date('m');
+
+        $stmt = $this->db->prepare("
+            SELECT last_number
+            FROM document_sequences
+            WHERE department_id = :department_id
+            AND year = :year
+            AND month = :month
+        ");
+
+        $stmt->execute([
+            'department_id' => $departmentId,
+            'year' => $year,
+            'month' => $month
+        ]);
+
+        $lastNumber = (int) ($stmt->fetchColumn() ?: 0);
+        $formattedNumber = str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
+
+        return "{$department['code']}-{$year}-{$month}-{$formattedNumber}";
+    }
+
     private function hasThru($documentId)
     {
         $stmt = $this->db->prepare("
@@ -406,6 +522,26 @@ class Document
         return $route ?: null;
     }
 
+    public function getLatestRouteRecordForDepartment($documentId, $departmentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT *
+            FROM document_routes
+            WHERE document_id = :document_id
+            AND to_department_id = :department_id
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'document_id' => $documentId,
+            'department_id' => $departmentId
+        ]);
+
+        $route = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $route ?: null;
+    }
+
 
     public function getRoutingByDocument($documentId)
     {
@@ -560,7 +696,8 @@ class Document
                 'sequence_number' => $newNumber,
                 'title' => $data['title'],
                 'particulars' => $data['particulars'] !== '' ? $data['particulars'] : null,
-                'qr_token' => $data['qr_token'] ?? $this->generateQrToken(),
+                // Temporarily Disabled – QR Code Printing Feature
+                'qr_token' => $data['qr_token'] ?? ((defined('ENABLE_QR_PRINT') && ENABLE_QR_PRINT === true) ? $this->generateQrToken() : null),
                 'type' => $data['type'],
                 'origin_department_id' => $departmentId,
                 'destination_department_id' => $primaryDestination,
@@ -845,6 +982,315 @@ class Document
         }
     }
 
+    public function returnDocument($id, $userId, $departmentId, $returnReason, $attachmentIssue, $remarks)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $document = $this->findById($id);
+            if (!$document) {
+                throw new Exception('Document not found.');
+            }
+
+            if (($document['status'] ?? '') === 'Returned') {
+                throw new Exception('Document has already been returned.');
+            }
+
+            $route = $this->getLatestRouteRecordForDepartment($id, $departmentId);
+            $routeId = $route ? (int) $route['id'] : null;
+            $releasingDepartmentId = $route ? (int) $route['from_department_id'] : (int) $document['origin_department_id'];
+
+            if ($route && ($route['status'] ?? '') !== 'Pending') {
+                throw new Exception('Only pending documents can be returned.');
+            }
+
+            if (!$route && (
+                (int) $document['destination_department_id'] !== (int) $departmentId
+                || !in_array($document['status'] ?? '', ['Released', 'Re-released'], true)
+            )) {
+                throw new Exception('Only released documents can be returned.');
+            }
+
+            $updateDocument = $this->db->prepare("
+                UPDATE documents
+                SET status = 'Returned'
+                WHERE id = :id
+            ");
+            $updateDocument->execute(['id' => $id]);
+
+            if ($routeId !== null) {
+                $updateRoute = $this->db->prepare("
+                    UPDATE document_routes
+                    SET status = 'Returned'
+                    WHERE id = :id
+                ");
+                $updateRoute->execute(['id' => $routeId]);
+            }
+
+            $insertReturn = $this->db->prepare("
+                INSERT INTO document_returns (
+                    document_id,
+                    route_id,
+                    returned_by,
+                    returned_department_id,
+                    releasing_department_id,
+                    return_reason,
+                    attachment_issue,
+                    remarks
+                ) VALUES (
+                    :document_id,
+                    :route_id,
+                    :returned_by,
+                    :returned_department_id,
+                    :releasing_department_id,
+                    :return_reason,
+                    :attachment_issue,
+                    :remarks
+                )
+            ");
+
+            $insertReturn->execute([
+                'document_id' => $id,
+                'route_id' => $routeId,
+                'returned_by' => $userId,
+                'returned_department_id' => $departmentId,
+                'releasing_department_id' => $releasingDepartmentId,
+                'return_reason' => $returnReason,
+                'attachment_issue' => $attachmentIssue !== '' ? $attachmentIssue : null,
+                'remarks' => $remarks
+            ]);
+
+            $returnId = (int) $this->db->lastInsertId();
+            $issueLine = $attachmentIssue !== '' ? "Attachment issue: {$attachmentIssue}\n" : '';
+
+            $this->addDocumentLog(
+                $id,
+                'Returned',
+                $userId,
+                $departmentId,
+                "Returned due to attachment issue\nReason: {$returnReason}\n{$issueLine}Details: {$remarks}"
+            );
+
+            $this->db->commit();
+            return $returnId;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function getOpenReturn($documentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                dr.*,
+                returned_dept.division_name AS returned_department_name,
+                releasing_dept.division_name AS releasing_department_name,
+                CONCAT(u.firstname, ' ', IFNULL(CONCAT(u.middle_initial, '. '), ''), u.lastname) AS returned_by_name
+            FROM document_returns dr
+            JOIN departments returned_dept ON dr.returned_department_id = returned_dept.id
+            JOIN departments releasing_dept ON dr.releasing_department_id = releasing_dept.id
+            JOIN users u ON dr.returned_by = u.id
+            WHERE dr.document_id = :document_id
+            AND dr.status = 'Open'
+            ORDER BY dr.returned_at DESC, dr.id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute(['document_id' => $documentId]);
+        $return = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $return ?: null;
+    }
+
+    public function getAttachmentHistory($documentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                ah.*,
+                ret.return_reason,
+                CONCAT(u.firstname, ' ', IFNULL(CONCAT(u.middle_initial, '. '), ''), u.lastname) AS uploaded_by_name
+            FROM document_attachment_history ah
+            LEFT JOIN document_returns ret ON ah.return_id = ret.id
+            JOIN users u ON ah.uploaded_by = u.id
+            WHERE ah.document_id = :document_id
+            ORDER BY ah.uploaded_at DESC, ah.id DESC
+        ");
+
+        $stmt->execute(['document_id' => $documentId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function hasReplacementForReturn($returnId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM document_attachment_history
+            WHERE return_id = :return_id
+        ");
+
+        $stmt->execute(['return_id' => $returnId]);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function replaceReturnedAttachment($documentId, $newFilename, $userId, $departmentId, $replacementReason)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $document = $this->findById($documentId);
+            $openReturn = $this->getOpenReturn($documentId);
+
+            if (!$document || !$openReturn) {
+                throw new Exception('Returned document not found.');
+            }
+
+            if ((int) $openReturn['releasing_department_id'] !== (int) $departmentId) {
+                throw new Exception('Only the releasing department can replace this attachment.');
+            }
+
+            $oldFilename = $document['attachment'] ?? null;
+
+            $clearActive = $this->db->prepare("
+                UPDATE document_attachment_history
+                SET is_active = 0
+                WHERE document_id = :document_id
+            ");
+            $clearActive->execute(['document_id' => $documentId]);
+
+            $updateDocument = $this->db->prepare("
+                UPDATE documents
+                SET attachment = :attachment
+                WHERE id = :id
+            ");
+            $updateDocument->execute([
+                'id' => $documentId,
+                'attachment' => $newFilename
+            ]);
+
+            $insertHistory = $this->db->prepare("
+                INSERT INTO document_attachment_history (
+                    document_id,
+                    return_id,
+                    old_filename,
+                    new_filename,
+                    uploaded_by,
+                    replacement_reason,
+                    is_active
+                ) VALUES (
+                    :document_id,
+                    :return_id,
+                    :old_filename,
+                    :new_filename,
+                    :uploaded_by,
+                    :replacement_reason,
+                    1
+                )
+            ");
+
+            $insertHistory->execute([
+                'document_id' => $documentId,
+                'return_id' => (int) $openReturn['id'],
+                'old_filename' => $oldFilename,
+                'new_filename' => $newFilename,
+                'uploaded_by' => $userId,
+                'replacement_reason' => $replacementReason
+            ]);
+
+            $this->addDocumentLog(
+                $documentId,
+                'Attachment Replaced',
+                $userId,
+                $departmentId,
+                $openReturn['return_reason'] ?: $replacementReason
+            );
+
+            $this->db->commit();
+            return true;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function reReleaseReturnedDocument($documentId, $userId, $departmentId)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $openReturn = $this->getOpenReturn($documentId);
+            if (!$openReturn) {
+                throw new Exception('No open return record found.');
+            }
+
+            if ((int) $openReturn['releasing_department_id'] !== (int) $departmentId) {
+                throw new Exception('Only the releasing department can re-release this document.');
+            }
+
+            if (!$this->hasReplacementForReturn((int) $openReturn['id'])) {
+                throw new Exception('Upload a corrected attachment before re-releasing this document.');
+            }
+
+            $updateDocument = $this->db->prepare("
+                UPDATE documents
+                SET status = 'Re-released',
+                    released_by = :released_by,
+                    released_at = NOW(),
+                    received_by = NULL,
+                    received_at = NULL
+                WHERE id = :id
+            ");
+
+            $updateDocument->execute([
+                'id' => $documentId,
+                'released_by' => $userId
+            ]);
+
+            if (!empty($openReturn['route_id'])) {
+                $updateRoute = $this->db->prepare("
+                    UPDATE document_routes
+                    SET status = 'Pending',
+                        received_at = NULL,
+                        routed_at = NOW()
+                    WHERE id = :route_id
+                ");
+                $updateRoute->execute(['route_id' => (int) $openReturn['route_id']]);
+            }
+
+            $resolveReturn = $this->db->prepare("
+                UPDATE document_returns
+                SET status = 'Resolved',
+                    resolved_at = NOW(),
+                    resolved_by = :resolved_by
+                WHERE id = :id
+            ");
+
+            $resolveReturn->execute([
+                'id' => (int) $openReturn['id'],
+                'resolved_by' => $userId
+            ]);
+
+            $this->addDocumentLog(
+                $documentId,
+                'Re-released',
+                $userId,
+                $departmentId,
+                'Document Re-released'
+            );
+
+            $this->db->commit();
+            return true;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     public function findById($id)
     {
         $stmt = $this->db->prepare("SELECT * FROM documents WHERE id = :id");
@@ -900,7 +1346,7 @@ class Document
             LEFT JOIN document_routes r
                 ON d.id = r.document_id
                 AND r.to_department_id = :department_id
-            WHERE d.status <> 'Draft'
+            WHERE d.status IN ('Released', 'Re-released', 'Received')
             AND (
                 (r.routing_type = 'THRU' AND r.status = 'Pending')
                 OR (
@@ -925,6 +1371,7 @@ class Document
                 OR (
                     r.id IS NULL
                     AND d.destination_department_id = :department_id
+                    AND d.status IN ('Released', 'Re-released')
                 )
             )
             ORDER BY d.released_at DESC
@@ -959,7 +1406,7 @@ class Document
             LEFT JOIN document_routes r
                 ON d.id = r.document_id
                 AND r.to_department_id = :department_id
-            WHERE d.status <> 'Draft'
+            WHERE d.status IN ('Released', 'Re-released', 'Received')
             AND (
                 (r.routing_type = 'THRU' AND r.status = 'Pending')
                 OR (
@@ -984,6 +1431,7 @@ class Document
                 OR (
                     r.id IS NULL
                     AND d.destination_department_id = :department_id
+                    AND d.status IN ('Released', 'Re-released')
                 )
             )
         ";
@@ -1056,9 +1504,11 @@ class Document
             ORDER BY
                 CASE d.status
                     WHEN 'Released' THEN 1
-                    WHEN 'Draft' THEN 2
-                    WHEN 'Received' THEN 3
-                    ELSE 4
+                    WHEN 'Re-released' THEN 2
+                    WHEN 'Draft' THEN 3
+                    WHEN 'Returned' THEN 4
+                    WHEN 'Received' THEN 5
+                    ELSE 6
                 END,
                 COALESCE(d.released_at, d.created_at) DESC,
                 d.created_at DESC
@@ -1162,9 +1612,11 @@ class Document
             ORDER BY
                 CASE d.status
                     WHEN 'Released' THEN 1
-                    WHEN 'Draft' THEN 2
-                    WHEN 'Received' THEN 3
-                    ELSE 4
+                    WHEN 'Re-released' THEN 2
+                    WHEN 'Draft' THEN 3
+                    WHEN 'Returned' THEN 4
+                    WHEN 'Received' THEN 5
+                    ELSE 6
                 END,
                 COALESCE(d.released_at, d.created_at) DESC,
                 d.created_at DESC
@@ -1432,6 +1884,37 @@ class Document
             'dept_id' => $department_id,
             'exclude_user_id' => $exclude_user_id
         ]);
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function departmentHandledDocumentWithActions($document_id, $department_id, $actions = [])
+    {
+        $sql = "
+            SELECT COUNT(*)
+            FROM document_logs
+            WHERE document_id = :doc_id
+            AND department_id = :dept_id
+        ";
+
+        $params = [
+            'doc_id' => $document_id,
+            'dept_id' => $department_id
+        ];
+
+        if (!empty($actions)) {
+            $placeholders = [];
+            foreach (array_values($actions) as $index => $action) {
+                $key = 'action_' . $index;
+                $placeholders[] = ':' . $key;
+                $params[$key] = $action;
+            }
+
+            $sql .= " AND action IN (" . implode(', ', $placeholders) . ")";
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
 
         return (int) $stmt->fetchColumn() > 0;
     }

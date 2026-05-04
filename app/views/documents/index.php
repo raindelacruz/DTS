@@ -5,7 +5,9 @@ $filters = $data['filters'] ?? [];
 $statusClasses = [
     'Draft' => 'bg-secondary-subtle text-secondary border border-secondary-subtle',
     'Released' => 'bg-warning-subtle text-warning border border-warning-subtle',
-    'Received' => 'bg-success-subtle text-success border border-success-subtle'
+    'Received' => 'bg-success-subtle text-success border border-success-subtle',
+    'Returned' => 'bg-danger-subtle text-danger border border-danger-subtle',
+    'Re-released' => 'bg-primary-subtle text-primary border border-primary-subtle'
 ];
 ?>
 
@@ -13,19 +15,22 @@ $statusClasses = [
     .documents-hero {
         background: linear-gradient(135deg, #f8fafc 0%, #eef6ff 100%);
         border: 1px solid #dbe7f3;
-        border-radius: 18px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
+        border-radius: 20px;
+        padding: 1rem 1.15rem;
+        margin-bottom: 1rem;
     }
-    .documents-stat { border-radius: 16px; padding: 1rem 1.2rem; color: #0f172a; min-height: 100%; }
-    .documents-stat strong { display: block; font-size: 1.7rem; line-height: 1; margin-top: 0.35rem; }
+    .documents-hero h2 { margin: 0; font-size: 1.55rem; font-weight: 800; }
+    .documents-stat { border-radius: 16px; padding: 0.85rem 1rem; color: #0f172a; min-height: 100%; }
+    .documents-stat strong { display: block; font-size: 1.5rem; line-height: 1; margin-top: 0.25rem; }
     .documents-filters { border: 1px solid #e2e8f0; border-radius: 18px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06); }
     .documents-table-card { border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden; box-shadow: 0 14px 36px rgba(15, 23, 42, 0.06); }
     .documents-table thead th { background: #f8fafc; color: #475569; font-size: 0.82rem; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+    .documents-table td,
+    .documents-table th { padding: 0.72rem 0.85rem; }
     .documents-table tbody tr:hover { background: #f8fbff; }
     .documents-title { font-weight: 600; color: #0f172a; }
     .documents-meta { color: #64748b; font-size: 0.85rem; }
-    .status-pill { border-radius: 999px; font-size: 0.78rem; font-weight: 700; padding: 0.45rem 0.8rem; display: inline-block; }
+    .status-pill { border-radius: 999px; font-size: 0.76rem; font-weight: 700; padding: 0.35rem 0.68rem; display: inline-block; }
     .release-empty { color: #94a3b8; font-style: italic; }
 </style>
 
@@ -41,7 +46,7 @@ $statusClasses = [
 
 <div class="row g-3 mb-4">
     <div class="col-md-3"><div class="documents-stat" style="background:#e0f2fe;"><span class="text-uppercase small text-muted">Visible Documents</span><strong><?php echo (int) ($data['total_documents'] ?? 0); ?></strong></div></div>
-    <div class="col-md-3"><div class="documents-stat" style="background:#fef3c7;"><span class="text-uppercase small text-muted">Released</span><strong><?php echo (int) (($data['status_counts']['Released'] ?? 0)); ?></strong></div></div>
+    <div class="col-md-3"><div class="documents-stat" style="background:#fef3c7;"><span class="text-uppercase small text-muted">Released</span><strong><?php echo (int) (($data['status_counts']['Released'] ?? 0) + ($data['status_counts']['Re-released'] ?? 0)); ?></strong></div></div>
     <div class="col-md-3"><div class="documents-stat" style="background:#e2e8f0;"><span class="text-uppercase small text-muted">Draft</span><strong><?php echo (int) (($data['status_counts']['Draft'] ?? 0)); ?></strong></div></div>
     <div class="col-md-3"><div class="documents-stat" style="background:#dcfce7;"><span class="text-uppercase small text-muted">Received</span><strong><?php echo (int) (($data['status_counts']['Received'] ?? 0)); ?></strong></div></div>
 </div>
@@ -57,7 +62,7 @@ $statusClasses = [
                 <label class="form-label fw-semibold">Status</label>
                 <select name="status" class="form-select">
                     <option value="">All Status</option>
-                    <?php foreach (['Draft', 'Released', 'Received'] as $status): ?>
+                    <?php foreach (['Draft', 'Released', 'Re-released', 'Received', 'Returned'] as $status): ?>
                         <option value="<?php echo $status; ?>" <?php echo (($filters['status'] ?? '') === $status) ? 'selected' : ''; ?>><?php echo $status; ?></option>
                     <?php endforeach; ?>
                 </select>

@@ -4,7 +4,9 @@
 $statusClasses = [
     'Draft' => 'background:#e2e8f0; color:#334155;',
     'Released' => 'background:#fef3c7; color:#92400e;',
-    'Received' => 'background:#dcfce7; color:#166534;'
+    'Received' => 'background:#dcfce7; color:#166534;',
+    'Returned' => 'background:#fee2e2; color:#991b1b;',
+    'Re-released' => 'background:#dbeafe; color:#1e40af;'
 ];
 $filters = $data['filters'] ?? [];
 ?>
@@ -28,7 +30,7 @@ $filters = $data['filters'] ?? [];
             <label class="form-label fw-semibold">Status</label>
             <select name="status" class="form-select">
                 <option value="">All Status</option>
-                <?php foreach (['Draft', 'Released', 'Received'] as $status): ?>
+                <?php foreach (['Draft', 'Released', 'Re-released', 'Received', 'Returned'] as $status): ?>
                     <option value="<?php echo $status; ?>" <?php echo (($filters['status'] ?? '') === $status) ? 'selected' : ''; ?>><?php echo $status; ?></option>
                 <?php endforeach; ?>
             </select>

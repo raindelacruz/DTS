@@ -13,6 +13,16 @@ class PdfOverlayService
 {
     public static function streamStampedPdf($sourcePath, $verificationUrl, $downloadName)
     {
+        // Temporarily Disabled – QR Code Printing Feature
+        if (!defined('ENABLE_QR_PRINT') || ENABLE_QR_PRINT !== true) {
+            header('Content-Type: application/pdf');
+            header('Content-Length: ' . (string) filesize($sourcePath));
+            header('Content-Disposition: inline; filename="' . rawurlencode($downloadName) . '"');
+            header('X-Content-Type-Options: nosniff');
+            readfile($sourcePath);
+            return;
+        }
+
         $pdf = new Fpdi('P', 'mm');
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);

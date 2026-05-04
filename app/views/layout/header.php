@@ -47,17 +47,18 @@
         }
 
         .app-shell { display: flex; min-height: 100vh; }
-        .app-sidebar { width: 280px; padding: 1.5rem; position: sticky; top: 0; height: 100vh; }
+        .app-sidebar { width: 260px; padding: 1rem; position: sticky; top: 0; height: 100vh; }
         .app-sidebar-panel {
-            height: 100%; border-radius: 28px; padding: 1.4rem;
+            height: 100%; border-radius: 24px; padding: 1rem;
             background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(245,248,252,0.92) 100%);
             border: 1px solid rgba(255,255,255,0.75); box-shadow: var(--shadow-soft);
             display: flex; flex-direction: column; backdrop-filter: blur(14px);
         }
-        .sidebar-nav { gap: 0.4rem; }
+        .sidebar-nav { gap: 0.25rem; }
         .sidebar-link {
-            display: flex; align-items: center; gap: 0.85rem; padding: 0.95rem 1rem;
-            border-radius: 16px; color: #1e293b; text-decoration: none; font-weight: 600; transition: 0.2s ease;
+            display: flex; align-items: center; gap: 0.7rem; padding: 0.68rem 0.8rem;
+            border-radius: 14px; color: #1e293b; text-decoration: none; font-weight: 600; transition: 0.2s ease;
+            min-height: 3rem;
         }
         .sidebar-link:hover { background: rgba(15, 118, 110, 0.08); color: var(--brand-deep); transform: translateX(2px); }
         .sidebar-link.active {
@@ -65,25 +66,25 @@
             color: var(--brand-deep); box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.12);
         }
         .sidebar-icon {
-            width: 2.2rem; height: 2.2rem; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
+            width: 2rem; height: 2rem; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center;
             background: rgba(255,255,255,0.9); color: var(--brand-deep); box-shadow: 0 10px 18px rgba(15, 23, 42, 0.06); font-size: 0.95rem;
         }
-        .app-main { flex: 1; padding: 1.5rem 1.5rem 1.5rem 0; }
+        .app-main { flex: 1; padding: 1rem 1rem 1rem 0; min-width: 0; }
         .topbar {
             position: relative;
             z-index: 1200;
             overflow: visible;
-            display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.25rem;
-            margin-bottom: 1.5rem; border-radius: 22px; background: rgba(255,255,255,0.88);
+            display: flex; justify-content: space-between; align-items: center; gap: 0.85rem; padding: 0.85rem 1.1rem;
+            margin-bottom: 1rem; border-radius: 20px; background: rgba(255,255,255,0.88);
             border: 1px solid rgba(255,255,255,0.75); box-shadow: var(--shadow-card); backdrop-filter: blur(14px);
         }
-        .topbar-brand { display: flex; align-items: center; gap: 0.85rem; }
-        .topbar-brand img { width: 48px; height: 48px; object-fit: contain; border-radius: 12px; }
-        .topbar h2 { margin: 0; font-size: 1.15rem; font-weight: 800; }
-        .topbar-user { position: relative; z-index: 1201; display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; justify-content: flex-end; }
+        .topbar-brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+        .topbar-brand img { width: 42px; height: 42px; object-fit: contain; border-radius: 11px; flex: 0 0 auto; }
+        .topbar h2 { margin: 0; font-size: 1.05rem; font-weight: 800; }
+        .topbar-user { position: relative; z-index: 1201; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
         .notification-toggle {
-            position: relative; width: 44px; height: 44px; border-radius: 14px; border: 1px solid var(--border-soft);
-            background: #fff; font-size: 1.15rem; display: inline-flex; align-items: center; justify-content: center;
+            position: relative; width: 40px; height: 40px; border-radius: 13px; border: 1px solid var(--border-soft);
+            background: #fff; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center;
             text-decoration: none; color: #0f172a;
         }
         .notification-toggle svg {
@@ -118,43 +119,43 @@
         .notification-message { color: #475569; font-size: 0.85rem; margin-top: 0.2rem; }
         .notification-time { color: #94a3b8; font-size: 0.76rem; margin-top: 0.35rem; }
         .user-chip {
-            display: inline-flex; align-items: center; gap: 0.75rem; padding: 0.55rem 0.9rem; border-radius: 999px;
+            display: inline-flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.75rem; border-radius: 999px;
             background: var(--surface-strong); border: 1px solid var(--border-soft); box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
         }
         .user-avatar {
-            width: 2.2rem; height: 2.2rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+            width: 2rem; height: 2rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
             background: linear-gradient(135deg, #0f766e 0%, #164e63 100%); color: white; font-weight: 800;
         }
-        .content-frame { min-height: calc(100vh - 7rem); }
+        .content-frame { min-height: calc(100vh - 6rem); }
         .app-card {
             background: rgba(255,255,255,0.9); border: 1px solid rgba(255,255,255,0.85);
             border-radius: var(--radius-lg); box-shadow: var(--shadow-card); backdrop-filter: blur(12px);
         }
-        .section-title { font-size: 1.85rem; font-weight: 800; margin: 0; }
+        .section-title { font-size: 1.55rem; font-weight: 800; margin: 0; }
         .table-modern thead th {
             border: 0; background: #f8fafc; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
             font-size: 0.78rem; white-space: nowrap;
         }
-        .table-modern tbody td { border-color: #edf2f7; vertical-align: middle; }
+        .table-modern tbody td { border-color: #edf2f7; vertical-align: middle; padding-top: 0.75rem; padding-bottom: 0.75rem; }
         .table-modern tbody tr:hover { background: #f8fbfd; }
-        .badge-soft { border-radius: 999px; padding: 0.45rem 0.8rem; font-weight: 700; font-size: 0.78rem; }
+        .badge-soft { border-radius: 999px; padding: 0.35rem 0.68rem; font-weight: 700; font-size: 0.76rem; }
         .page-hero {
-            display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1.5rem; margin-bottom: 1.5rem;
-            border-radius: 22px; background: linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(239,246,255,0.94) 100%);
+            display: flex; justify-content: space-between; align-items: center; gap: 0.85rem; padding: 1rem 1.15rem; margin-bottom: 1rem;
+            border-radius: 20px; background: linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(239,246,255,0.94) 100%);
             border: 1px solid rgba(255,255,255,0.85); box-shadow: var(--shadow-card);
         }
-        .page-hero.compact { padding: 1.25rem 1.35rem; }
+        .page-hero.compact { padding: 0.95rem 1.05rem; }
         .instruction-card {
-            margin-bottom: 1.5rem;
-            padding: 1rem 1.15rem;
-            border-radius: 18px;
+            margin-bottom: 1rem;
+            padding: 0.85rem 1rem;
+            border-radius: 16px;
             background: linear-gradient(135deg, #ecfeff 0%, #f8fafc 100%);
             border: 1px solid #cfe9ec;
             box-shadow: var(--shadow-card);
         }
         .instruction-card h3 {
-            margin: 0 0 0.45rem;
-            font-size: 0.95rem;
+            margin: 0 0 0.3rem;
+            font-size: 0.82rem;
             font-weight: 800;
             color: #0f766e;
             text-transform: uppercase;
@@ -163,27 +164,32 @@
         .instruction-card p {
             margin: 0;
             color: #334155;
-            line-height: 1.55;
+            line-height: 1.45;
+            font-size: 0.92rem;
         }
         .instruction-card strong { color: #0f172a; }
         .form-control, .form-select, textarea.form-control {
-            border-radius: 14px; border-color: #dbe4ee; padding: 0.75rem 0.9rem; box-shadow: none;
+            border-radius: 12px; border-color: #dbe4ee; padding: 0.62rem 0.85rem; box-shadow: none;
+            min-height: 2.65rem;
+        }
+        textarea.form-control {
+            min-height: auto;
         }
         .form-control:focus, .form-select:focus, textarea.form-control:focus {
             border-color: rgba(15, 118, 110, 0.45); box-shadow: 0 0 0 0.2rem rgba(15, 118, 110, 0.12);
         }
         .route-checkbox-group {
             display: grid;
-            gap: 0.7rem;
-            max-height: 24rem;
+            gap: 0.5rem;
+            max-height: 20rem;
             overflow-y: auto;
-            padding: 0.95rem;
+            padding: 0.75rem;
             border: 1px solid #dbe4ee;
-            border-radius: 16px;
+            border-radius: 14px;
             background: rgba(248, 250, 252, 0.75);
         }
         .route-search-wrap {
-            margin-bottom: 0.8rem;
+            margin-bottom: 0.55rem;
         }
         .route-search-input {
             background: rgba(255, 255, 255, 0.96);
@@ -191,9 +197,9 @@
         .route-checkbox-item {
             display: flex;
             align-items: flex-start;
-            gap: 0.75rem;
-            padding: 0.8rem 0.9rem;
-            border-radius: 14px;
+            gap: 0.6rem;
+            padding: 0.62rem 0.75rem;
+            border-radius: 12px;
             background: #ffffff;
             border: 1px solid rgba(219, 228, 238, 0.9);
             cursor: pointer;
@@ -214,9 +220,9 @@
             background: linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(240, 249, 255, 0.95));
         }
         .route-empty-state {
-            padding: 1rem;
+            padding: 0.8rem;
             border: 1px dashed #cbd5e1;
-            border-radius: 14px;
+            border-radius: 12px;
             color: #64748b;
             background: rgba(255, 255, 255, 0.85);
             text-align: center;
@@ -230,24 +236,62 @@
             color: #0f766e;
             padding: 0.2rem 0.15rem 0;
         }
-        .btn { border-radius: 14px; font-weight: 700; padding: 0.7rem 1rem; }
+        .btn { border-radius: 12px; font-weight: 700; padding: 0.58rem 0.88rem; }
+        .btn-sm { border-radius: 10px; padding: 0.38rem 0.65rem; }
+        .btn-lg { padding: 0.68rem 1rem; font-size: 1rem; border-radius: 13px; }
         .btn-primary { background: linear-gradient(135deg, #0f766e 0%, #164e63 100%); border: none; }
         .btn-primary:hover { background: linear-gradient(135deg, #115e59 0%, #0f3f53 100%); }
         .btn-warning { border: none; color: #111827; }
+        .form-label { margin-bottom: 0.35rem; font-size: 0.9rem; }
+        .form-text { margin-top: 0.35rem; font-size: 0.8rem; }
+        .content-frame > .mb-4,
+        .content-frame .app-card.mb-4,
+        .content-frame .card.mb-4,
+        .content-frame .alert.mb-4 { margin-bottom: 1rem !important; }
+        .content-frame .row.g-4 {
+            --bs-gutter-x: 1rem;
+            --bs-gutter-y: 1rem;
+        }
+        .content-frame .row.g-3 {
+            --bs-gutter-x: 0.9rem;
+            --bs-gutter-y: 0.9rem;
+        }
+        .content-frame .gap-3 { gap: 0.75rem !important; }
+        .content-frame .mt-4 { margin-top: 1rem !important; }
+        .content-frame .pt-2 { padding-top: 0.25rem !important; }
+        .content-frame .app-card.p-4,
+        .content-frame .app-card.p-lg-5,
+        .content-frame .card-body.p-4 { padding: 1rem !important; }
+        .content-frame .display-6 { font-size: 1.85rem; }
+        .content-frame .table > :not(caption) > * > * { padding: 0.7rem 0.8rem; }
 
         @media (max-width: 991.98px) {
             .app-shell { display: block; }
-            .app-sidebar { width: 100%; height: auto; position: static; padding: 1rem 1rem 0; }
+            .app-sidebar { width: 100%; height: auto; position: static; padding: 0.85rem 0.85rem 0; }
             .app-main { padding: 1rem; }
             .app-sidebar-panel { height: auto; }
             .page-hero, .topbar { flex-direction: column; align-items: stretch; }
             .topbar-brand { justify-content: center; }
+            .topbar-user { justify-content: center; }
             .notification-menu {
                 position: absolute;
                 z-index: 1300;
                 width: 100%;
             }
             .route-checkbox-group { max-height: 18rem; }
+        }
+
+        @media (max-width: 575.98px) {
+            .app-main { padding: 0.85rem; }
+            .topbar,
+            .page-hero,
+            .instruction-card,
+            .content-frame .app-card.p-4,
+            .content-frame .app-card.p-lg-5,
+            .content-frame .card-body.p-4 { padding: 0.85rem !important; }
+            .section-title { font-size: 1.35rem; }
+            .topbar h2 { font-size: 0.98rem; text-align: center; }
+            .user-chip { max-width: 100%; }
         }
     </style>
 </head>

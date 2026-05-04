@@ -18,7 +18,7 @@ foreach (($data['users'] ?? []) as $userSummary) {
 
 <div class="instruction-card">
     <h3>Quick Guide</h3>
-    <p>Review new registrations here and activate only verified accounts. Users manage only their own <strong>department</strong> and <strong>email</strong> from the profile page, while access control stays with administrators.</p>
+    <p>Review new registrations here, activate only verified accounts, and assign each user the correct <strong>role</strong>. Users manage only their own <strong>department</strong> and <strong>email</strong> from the profile page.</p>
 </div>
 
 <div class="row g-4 mb-4">
@@ -42,7 +42,19 @@ foreach (($data['users'] ?? []) as $userSummary) {
                             <td><div class="fw-semibold"><?php echo htmlspecialchars(trim($user->firstname . ' ' . $user->lastname)); ?></div></td>
                             <td><?php echo htmlspecialchars($user->email ?? '-'); ?></td>
                             <td><?php echo htmlspecialchars($user->department_name ?? 'Unassigned'); ?></td>
-                            <td><span class="badge bg-light text-dark border"><?php echo htmlspecialchars(ucfirst($user->role)); ?></span></td>
+                            <td style="min-width: 220px;">
+                                <form action="<?php echo URLROOT; ?>/users/updateRole/<?php echo $user->id; ?>" method="POST" class="d-flex gap-2 align-items-center justify-content-start">
+                                    <?php echo csrfInput(); ?>
+                                    <select name="role" class="form-select form-select-sm" aria-label="Role for <?php echo htmlspecialchars(trim($user->firstname . ' ' . $user->lastname)); ?>">
+                                        <?php foreach (($data['roles'] ?? []) as $roleValue => $roleLabel): ?>
+                                            <option value="<?php echo htmlspecialchars($roleValue); ?>" <?php echo (string) $user->role === (string) $roleValue ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($roleLabel); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
+                                </form>
+                            </td>
                             <td><span class="badge-soft" style="<?php echo $user->status === 'active' ? 'background:#dcfce7; color:#166534;' : 'background:#e2e8f0; color:#334155;'; ?>"><?php echo htmlspecialchars(ucfirst($user->status)); ?></span></td>
                             <td><?php echo !empty($user->created_at) ? htmlspecialchars(date('M d, Y h:i A', strtotime($user->created_at))) : ''; ?></td>
                             <td class="text-end">

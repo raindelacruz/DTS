@@ -33,6 +33,7 @@ class Users extends Controller
 
             $data = [
                 'users' => $this->userModel->getAllWithDepartments(),
+                'roles' => User::roles(),
                 'success' => pullFlash('users_success')['message'] ?? '',
                 'error' => pullFlash('users_error')['message'] ?? ''
             ];
@@ -135,6 +136,57 @@ class Users extends Controller
     public function deactivate($id)
     {
         $this->setStatus($id, 'inactive');
+    }
+
+    public function updateRole($id)
+    {
+        $role = trim($_POST['role'] ?? '');
+
+        try {
+            $this->requireAdmin();
+            requirePost();
+            validateCsrfOrFail();
+
+            $user = $this->userModel->findById((int) $id);
+            if (!$user) {
+                throw new ValidationException('User not found.');
+            }
+
+            if (!User::roleExists($role)) {
+                throw new ValidationException('Please select a valid role.');
+            }
+
+            if ((int) $user->id === (int) $_SESSION['user_id'] && $role !== 'admin') {
+                throw new ValidationException('You cannot remove your own administrator role.');
+            }
+
+            if ((string) $user->role === $role) {
+                flash('users_success', 'Role is already up to date.', 'success');
+                redirect('/users', 303);
+            }
+
+            $this->userModel->updateRole((int) $id, $role);
+
+            $this->notificationModel->create(
+                (int) $user->id,
+                'Role updated',
+                'Your account role has been updated to ' . User::roles()[$role] . '.',
+                '/dashboard'
+            );
+
+            flash('users_success', 'User role updated successfully.', 'success');
+            redirect('/users', 303);
+        } catch (AuthorizationException $e) {
+            flash('users_error', 'You are not allowed to change user roles.', 'error');
+            redirect('/dashboard', 303);
+        } catch (ValidationException $e) {
+            flash('users_error', $e->getMessage(), 'error');
+            redirect('/users', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'users.updateRole', 'target_user_id' => (int) $id, 'role' => $role]);
+            flash('users_error', 'We could not update that role right now. Please try again.', 'error');
+            redirect('/users', 303);
+        }
     }
 
     private function setStatus($id, $status)

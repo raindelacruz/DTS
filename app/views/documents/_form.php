@@ -7,6 +7,7 @@ $submitLabel = $submitLabel ?? 'Save Document';
 $formAction = $formAction ?? '';
 $cancelUrl = $cancelUrl ?? (URLROOT . '/documents');
 $showAttachmentHint = $showAttachmentHint ?? false;
+$nextPrefix = $nextPrefix ?? '';
 $errors = $errors ?? [];
 $formMessage = $formMessage ?? '';
 ?>
@@ -15,6 +16,22 @@ $formMessage = $formMessage ?? '';
     <?php echo csrfInput(); ?>
     <?php if ($formMessage !== ''): ?>
         <div class="alert alert-danger mb-4"><?php echo htmlspecialchars($formMessage); ?></div>
+    <?php endif; ?>
+    <?php if ($nextPrefix !== ''): ?>
+        <div class="row g-4 mb-1">
+            <div class="col-md-6">
+                <label class="form-label fw-semibold" for="next_prefix">Next Prefix</label>
+                <input
+                    type="text"
+                    id="next_prefix"
+                    class="form-control"
+                    value="<?php echo htmlspecialchars($nextPrefix); ?>"
+                    readonly
+                    aria-describedby="next_prefix_help"
+                >
+                <div class="form-text" id="next_prefix_help">This is the next generated prefix for your department.</div>
+            </div>
+        </div>
     <?php endif; ?>
     <div class="row g-4">
         <div class="col-md-6">
@@ -153,7 +170,7 @@ $formMessage = $formMessage ?? '';
             <?php if ($showAttachmentHint): ?>
                 <div class="form-text">Leave this blank to keep the current file attached.</div>
             <?php else: ?>
-                <div class="form-text">Accepted formats: PDF, JPG, PNG, GIF, and WEBP.</div>
+                <div class="form-text">Accepted formats: PDF, JPG, PNG, GIF, and WEBP. Maximum size: <?php echo (int) MAX_ATTACHMENT_SIZE_MB; ?> MB.</div>
             <?php endif; ?>
             <?php if (!empty($errors['attachment'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($errors['attachment']); ?></div><?php endif; ?>
         </div>

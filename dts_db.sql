@@ -104,7 +104,7 @@ CREATE TABLE `documents` (
   `released_at` datetime DEFAULT NULL,
   `received_by` int(11) DEFAULT NULL,
   `received_at` datetime DEFAULT NULL,
-  `status` enum('Draft','Released','Received') DEFAULT 'Draft'
+  `status` enum('Draft','Released','Received','Returned','Re-released') DEFAULT 'Draft'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -126,6 +126,28 @@ CREATE TABLE `document_logs` (
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `document_returns`
+--
+
+CREATE TABLE `document_returns` (
+  `id` int(11) NOT NULL,
+  `document_id` int(11) NOT NULL,
+  `route_id` int(11) DEFAULT NULL,
+  `returned_by` int(11) NOT NULL,
+  `returned_department_id` int(11) NOT NULL,
+  `releasing_department_id` int(11) NOT NULL,
+  `return_reason` varchar(150) NOT NULL,
+  `attachment_issue` varchar(80) DEFAULT NULL,
+  `remarks` text NOT NULL,
+  `status` enum('Open','Resolved') NOT NULL DEFAULT 'Open',
+  `returned_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `resolved_at` datetime DEFAULT NULL,
+  `resolved_by` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `document_routes`
 --
 
@@ -136,9 +158,27 @@ CREATE TABLE `document_routes` (
   `to_department_id` int(11) NOT NULL,
   `routing_type` enum('TO','THRU','CC','DELEGATE') NOT NULL,
   `instructions` text DEFAULT NULL,
-  `status` enum('Pending','Received') DEFAULT 'Pending',
+  `status` enum('Pending','Received','Returned') DEFAULT 'Pending',
   `routed_at` datetime DEFAULT current_timestamp(),
   `received_at` datetime DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `document_attachment_history`
+--
+
+CREATE TABLE `document_attachment_history` (
+  `id` int(11) NOT NULL,
+  `document_id` int(11) NOT NULL,
+  `return_id` int(11) DEFAULT NULL,
+  `old_filename` varchar(255) DEFAULT NULL,
+  `new_filename` varchar(255) NOT NULL,
+  `uploaded_by` int(11) NOT NULL,
+  `uploaded_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `replacement_reason` text NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -197,25 +237,7 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`id`, `id_number`, `firstname`, `lastname`, `middle_initial`, `department_id`, `role`, `email`, `password`, `status`, `created_at`) VALUES
-(1, '2026001', 'System', 'Administrator', 'A', 1, 'admin', 'admin@nfa.gov.ph', '$2y$10$kcJwrfEP.FI77CIr0lp8H.3McUILtRXfma70P14WJ5aKvXu1YlmPO', 'active', '2026-02-12 05:10:30'),
-(2, '939908', 'Rainier John', 'Dela Cruz', 'J', 12, 'staff', 'rainier@test.com.ph', '$2y$10$Sj/gH5Un9q6K47BuhfuCKO6DbuYiFLf8xdKUqJqzxsCve2JqvW50e', 'active', '2026-02-19 03:01:56'),
-(3, '939909', 'Kristine', 'Elenzano', 'DC', 19, 'staff', 'kelenzano@test.com', '$2y$10$Sj/gH5Un9q6K47BuhfuCKO6DbuYiFLf8xdKUqJqzxsCve2JqvW50e', 'active', '2026-02-19 03:01:56'),
-(4, '939911', 'Ahn Pearl', 'Cabatic', 'C', 10, 'staff', 'apc@test.com', '$2y$10$MdtYTmHb.bCt4fdbBXAGpuhcpBWDH1kgBZmiyfen.T9TnO6Zs1FG2', 'active', '2026-02-20 05:28:50'),
-(7, '939913', 'Charlene', 'Gonzales', 'M', 22, 'staff', 'charlene@test.com', '$2y$10$6jvjWhoZaxUkv7FX3VqRfeF/kQLPqKP4A5ne.5Ynh/fvyKdxdytBi', 'active', '2026-02-20 10:42:52'),
-(8, '000001', 'Larry', 'Lacson', 'R', 1, 'manager', 'admin@test.com', '$2y$10$FeCzYweZCJUGlFCth1iH4OfXUzYkyZj1aCQreoJMQkyC7i/kx7rcy', 'active', '2026-02-21 12:28:59'),
-(9, '000005', 'Roy', 'Untiveros', 'Q', 16, 'manager', 'roi@test.com', '$2y$10$FeCzYweZCJUGlFCth1iH4OfXUzYkyZj1aCQreoJMQkyC7i/kx7rcy', 'active', '2026-02-21 12:32:33'),
-(10, '000002', 'Robert', 'Hermano', 'J', 3, 'manager', 'jrh@test.com', '$2y$10$mUcZw1My6G1HMepp77qF3OIf/lvuI6kQhyqAqSNgwwxbUrzu83iLq', 'active', '2026-03-09 02:50:29'),
-(11, '939915', 'Jeff', 'Felipe', 'M', 21, 'staff', 'jeff@test.com', '$2y$10$FME3ocRBjGU0BB1BcLQDAOo2b2trHc34k1OwMxZpP8kl76dj8sBKe', 'active', '2026-03-09 05:28:17'),
-(12, '939916', 'Kirby', 'Yasol', 'N', 20, 'staff', 'kann@test.com', '$2y$10$FME3ocRBjGU0BB1BcLQDAOo2b2trHc34k1OwMxZpP8kl76dj8sBKe', 'active', '2026-03-09 05:30:27'),
-(13, '939917', 'Chrisopher', 'Alingod', NULL, 17, 'staff', 'CA@test.com', '$2y$10$hidTeEegfStUK2SrNm1RsuehY6D6iY8TmzjgqkkEjqBVTm4xz4WHS', 'active', '2026-03-10 04:50:52'),
-(14, '000006', 'Mario', 'Andrada', 'G', 10, 'manager', 'mga@test.com', '$2y$10$TNOReKxI7he1kCUrL/flPO8DJQP3DhE0A71J7VCe.N4aH5zdeaxrO', 'active', '2026-03-10 06:34:26'),
-(15, '939918', 'Gary', 'Riparip', 'L', 12, 'staff', 'glr@test.com', '$2y$10$TNOReKxI7he1kCUrL/flPO8DJQP3DhE0A71J7VCe.N4aH5zdeaxrO', 'active', '2026-03-10 06:35:17'),
-(16, '939919', 'Maria Luisa', 'Quiroz', 'DL', 11, 'staff', 'chinky@test.com', '$2y$10$TNOReKxI7he1kCUrL/flPO8DJQP3DhE0A71J7VCe.N4aH5zdeaxrO', 'active', '2026-03-10 06:37:29'),
-(17, '939920', 'Jeff', 'Biason', NULL, 16, 'staff', 'jb@test.com', '$2y$10$TNOReKxI7he1kCUrL/flPO8DJQP3DhE0A71J7VCe.N4aH5zdeaxrO', 'active', '2026-03-10 07:00:09'),
-(18, '000007', 'Mark Jing', 'Tayactac', 'D', 19, 'manager', 'mjdt@test.com', '$2y$10$TNOReKxI7he1kCUrL/flPO8DJQP3DhE0A71J7VCe.N4aH5zdeaxrO', 'active', '2026-03-10 07:01:23'),
-(19, '939921', 'Ado', 'Ado', NULL, 3, 'staff', 'ado@test.com', '$2y$10$TNOReKxI7he1kCUrL/flPO8DJQP3DhE0A71J7VCe.N4aH5zdeaxrO', 'active', '2026-03-10 07:07:13'),
-(20, '000008', 'Allan Joseph', 'Abapo', NULL, 22, 'manager', 'aja@test.com', '$2y$10$81.jrHlXdEnKYjy5PitYRueDDSp1m9wWeOGWBAai7btHvsxPjxfCu', 'active', '2026-03-11 03:52:49'),
-(21, '939922', 'Miya', 'Ongkit', NULL, 1, 'staff', 'miya@test.com', '$2y$10$m/3rtdSh6MUKGir823W9jeA5bY3vGgCbNET5yU4Mt4O.13g3cbbYS', 'active', '2026-03-11 03:55:33');
+(1, '000000', 'Rainier John', 'Dela Cruz', 'J', 12, 'admin', 'rainier.delacruz@nfa.gov.ph', '$2y$10$bls1Uxyqdv6KGFOOZl9Vl.xWxZ0AWdyUUcDEs93EYLklSBfs3QzsG', 'active', '2026-05-04 00:00:00');
 
 --
 -- Indexes for dumped tables
@@ -262,6 +284,19 @@ ALTER TABLE `document_logs`
   ADD KEY `idx_logs_document` (`document_id`);
 
 --
+-- Indexes for table `document_returns`
+--
+ALTER TABLE `document_returns`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_document_returns_document` (`document_id`),
+  ADD KEY `idx_document_returns_status` (`status`),
+  ADD KEY `idx_document_returns_route` (`route_id`),
+  ADD KEY `returned_by` (`returned_by`),
+  ADD KEY `returned_department_id` (`returned_department_id`),
+  ADD KEY `releasing_department_id` (`releasing_department_id`),
+  ADD KEY `resolved_by` (`resolved_by`);
+
+--
 -- Indexes for table `document_routes`
 --
 ALTER TABLE `document_routes`
@@ -269,6 +304,16 @@ ALTER TABLE `document_routes`
   ADD KEY `from_department_id` (`from_department_id`),
   ADD KEY `to_department_id` (`to_department_id`),
   ADD KEY `idx_routes_document` (`document_id`);
+
+--
+-- Indexes for table `document_attachment_history`
+--
+ALTER TABLE `document_attachment_history`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_document_attachment_history_document` (`document_id`),
+  ADD KEY `idx_document_attachment_history_return` (`return_id`),
+  ADD KEY `idx_document_attachment_history_active` (`document_id`,`is_active`),
+  ADD KEY `uploaded_by` (`uploaded_by`);
 
 --
 -- Indexes for table `document_sequences`
@@ -323,9 +368,21 @@ ALTER TABLE `document_logs`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT for table `document_returns`
+--
+ALTER TABLE `document_returns`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT for table `document_routes`
 --
 ALTER TABLE `document_routes`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `document_attachment_history`
+--
+ALTER TABLE `document_attachment_history`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
@@ -344,7 +401,7 @@ ALTER TABLE `notifications`
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=22;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- Constraints for dumped tables
@@ -382,12 +439,31 @@ ALTER TABLE `document_logs`
   ADD CONSTRAINT `document_logs_ibfk_3` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`);
 
 --
+-- Constraints for table `document_returns`
+--
+ALTER TABLE `document_returns`
+  ADD CONSTRAINT `document_returns_document_fk` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `document_returns_route_fk` FOREIGN KEY (`route_id`) REFERENCES `document_routes` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `document_returns_returned_by_fk` FOREIGN KEY (`returned_by`) REFERENCES `users` (`id`),
+  ADD CONSTRAINT `document_returns_returned_department_fk` FOREIGN KEY (`returned_department_id`) REFERENCES `departments` (`id`),
+  ADD CONSTRAINT `document_returns_releasing_department_fk` FOREIGN KEY (`releasing_department_id`) REFERENCES `departments` (`id`),
+  ADD CONSTRAINT `document_returns_resolved_by_fk` FOREIGN KEY (`resolved_by`) REFERENCES `users` (`id`);
+
+--
 -- Constraints for table `document_routes`
 --
 ALTER TABLE `document_routes`
   ADD CONSTRAINT `document_routes_ibfk_1` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `document_routes_ibfk_2` FOREIGN KEY (`from_department_id`) REFERENCES `departments` (`id`),
   ADD CONSTRAINT `document_routes_ibfk_3` FOREIGN KEY (`to_department_id`) REFERENCES `departments` (`id`);
+
+--
+-- Constraints for table `document_attachment_history`
+--
+ALTER TABLE `document_attachment_history`
+  ADD CONSTRAINT `document_attachment_history_document_fk` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `document_attachment_history_return_fk` FOREIGN KEY (`return_id`) REFERENCES `document_returns` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `document_attachment_history_uploaded_by_fk` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`);
 
 --
 -- Constraints for table `document_sequences`

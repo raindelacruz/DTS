@@ -6,8 +6,11 @@ $routeCleared = isset($routeRole['is_cleared']) ? ((int) $routeRole['is_cleared'
 $statusClasses = [
     'Draft' => 'background:#e2e8f0; color:#334155;',
     'Released' => 'background:#fef3c7; color:#92400e;',
-    'Received' => 'background:#dcfce7; color:#166534;'
+    'Received' => 'background:#dcfce7; color:#166534;',
+    'Returned' => 'background:#fee2e2; color:#991b1b;',
+    'Re-released' => 'background:#dbeafe; color:#1e40af;'
 ];
+$receivableStatuses = ['Released', 'Re-released'];
 ?>
 
 <div class="page-hero">
@@ -61,6 +64,21 @@ $statusClasses = [
             <?php if (!empty($document['attachment'])): ?>
                 <div class="mt-4 pt-3 border-top"><a href="<?php echo URLROOT; ?>/documents/attachment/<?php echo $document['id']; ?>" target="_blank" class="btn btn-outline-primary">View Attachment</a></div>
             <?php endif; ?>
+            <?php if (!empty($openReturn)): ?>
+                <div class="mt-4 p-3 rounded-3" style="background:#fff1f2; border:1px solid #fecdd3;">
+                    <div class="fw-bold text-danger mb-1">Returned due to attachment issue</div>
+                    <div class="small text-muted mb-2">
+                        Returned by <?php echo htmlspecialchars($openReturn['returned_by_name']); ?>
+                        from <?php echo htmlspecialchars($openReturn['returned_department_name']); ?>
+                        on <?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($openReturn['returned_at']))); ?>
+                    </div>
+                    <div><span class="fw-semibold">Reason:</span> <?php echo htmlspecialchars($openReturn['return_reason']); ?></div>
+                    <?php if (!empty($openReturn['attachment_issue'])): ?>
+                        <div><span class="fw-semibold">Issue:</span> <?php echo htmlspecialchars($openReturn['attachment_issue']); ?></div>
+                    <?php endif; ?>
+                    <div class="mt-2 text-body-secondary"><?php echo nl2br(htmlspecialchars($openReturn['remarks'])); ?></div>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
     <div class="col-lg-4">
@@ -96,11 +114,63 @@ $statusClasses = [
                     </form>
                 <?php endif; ?>
 
-                <?php if (!$isManager && $document['status'] !== 'Draft' && (($routeType && !$routeCleared && ($routeType === 'THRU' || $thruCleared)) || (!$routeType && $document['status'] === 'Released' && $document['destination_department_id'] == $_SESSION['department_id']))): ?>
+                <?php if (!$isManager && in_array($document['status'], $receivableStatuses, true) && (($routeType && !$routeCleared && ($routeType === 'THRU' || $thruCleared)) || (!$routeType && $document['destination_department_id'] == $_SESSION['department_id']))): ?>
                     <form action="<?php echo URLROOT; ?>/documents/receive/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
                         <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Receive this document?');">Receive Document</button>
                     </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canReturnDocument)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/returnDocument/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#fff7ed; border:1px solid #fed7aa; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Return Document</div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold" for="return_reason">Reason for return</label>
+                            <input type="text" id="return_reason" name="return_reason" class="form-control" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold" for="attachment_issue">Attachment issue</label>
+                            <select id="attachment_issue" name="attachment_issue" class="form-select">
+                                <option value="">Select issue</option>
+                                <?php foreach ($returnIssueOptions as $issue): ?>
+                                    <option value="<?php echo htmlspecialchars($issue); ?>"><?php echo htmlspecialchars($issue); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="return_remarks">Remarks/details</label>
+                            <textarea id="return_remarks" name="return_remarks" class="form-control" rows="3" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-danger w-100" onclick="return confirm('Return this document to the releasing department?');">Return Document</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canReplaceReturnedAttachment)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/uploadCorrectedAttachment/<?php echo $document['id']; ?>" method="POST" enctype="multipart/form-data" class="app-card p-3 mt-2" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Upload Corrected Attachment</div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold" for="corrected_attachment">Corrected attachment</label>
+                            <input type="file" id="corrected_attachment" name="corrected_attachment" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp" required>
+                            <div class="form-text">Maximum size: <?php echo (int) MAX_ATTACHMENT_SIZE_MB; ?> MB.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="replacement_reason">Reason for replacement</label>
+                            <textarea id="replacement_reason" name="replacement_reason" class="form-control" rows="3" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Upload Corrected Attachment</button>
+                    </form>
+
+                    <?php if (!empty($canReReleaseReturnedDocument)): ?>
+                        <form action="<?php echo URLROOT; ?>/documents/reRelease/<?php echo $document['id']; ?>" method="POST" class="m-0">
+                            <?php echo csrfInput(); ?>
+                            <button type="submit" class="btn btn-success w-100" onclick="return confirm('Re-release this document with the corrected attachment?');">Re-release Document</button>
+                        </form>
+                    <?php else: ?>
+                        <button type="button" class="btn btn-outline-secondary w-100" disabled>Re-release Document</button>
+                        <div class="small text-muted">Upload a corrected attachment before re-release.</div>
+                    <?php endif; ?>
                 <?php endif; ?>
 
                 <?php if ($isManager && $managerStaffHandled && !$managerAcknowledged): ?>
@@ -183,5 +253,39 @@ $statusClasses = [
         </div>
     </div>
 </div>
+
+<?php if (!empty($attachmentHistory)): ?>
+    <div class="app-card p-4 mb-4">
+        <h3 class="h5 fw-bold mb-3">Attachment History</h3>
+        <div class="table-responsive">
+            <table class="table table-modern align-middle mb-0">
+                <thead><tr><th>Old Filename</th><th>New Filename</th><th>Uploaded By</th><th>Date Uploaded</th><th>Reason</th><th>Return</th></tr></thead>
+                <tbody>
+                    <?php foreach ($attachmentHistory as $history): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars($history['old_filename'] ?: '-'); ?></td>
+                            <td class="fw-semibold">
+                                <?php echo htmlspecialchars($history['new_filename']); ?>
+                                <?php if (!empty($history['is_active'])): ?>
+                                    <span class="badge-soft ms-1" style="background:#dcfce7; color:#166534;">Active</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?php echo htmlspecialchars($history['uploaded_by_name']); ?></td>
+                            <td><?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($history['uploaded_at']))); ?></td>
+                            <td class="text-muted"><?php echo nl2br(htmlspecialchars($history['replacement_reason'])); ?></td>
+                            <td>
+                                <?php if (!empty($history['return_id'])): ?>
+                                    #<?php echo (int) $history['return_id']; ?><?php echo !empty($history['return_reason']) ? ' - ' . htmlspecialchars($history['return_reason']) : ''; ?>
+                                <?php else: ?>
+                                    -
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+<?php endif; ?>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

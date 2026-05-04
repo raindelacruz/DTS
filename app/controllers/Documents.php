@@ -96,6 +96,35 @@ class Documents extends Controller
         );
     }
 
+    private function departmentManagerHasReceived($documentId, $departmentId)
+    {
+        return $this->documentModel->departmentHandledDocumentWithActions(
+            $documentId,
+            $departmentId,
+            ['Manager Received', 'Cleared THRU', 'Noted CC', 'Forwarded']
+        );
+    }
+
+    private function simplifyTimelineRemarks($log)
+    {
+        $action = strtolower(trim((string) ($log['action'] ?? '')));
+        $remarks = trim((string) ($log['remarks'] ?? ''));
+
+        if ($action === 're-released') {
+            return 'Document Re-released';
+        }
+
+        if (strpos($action, 'attachment') !== false && strpos($action, 'replaced') !== false) {
+            if (preg_match('/^Reason:\s*(.+)$/mi', $remarks, $matches)) {
+                return trim($matches[1]);
+            }
+
+            return $remarks;
+        }
+
+        return $remarks;
+    }
+
     private function parseActionInstructions($instructions)
     {
         $details = [
@@ -148,6 +177,11 @@ class Documents extends Controller
             'deadline_date' => '',
             'instruction' => ''
         ];
+    }
+
+    private function releasableStatuses()
+    {
+        return ['Released', 'Re-released'];
     }
 
     private function normalizeDocumentFormValues($source)
@@ -289,21 +323,28 @@ class Documents extends Controller
         return bin2hex(random_bytes(16)) . '.' . $extension;
     }
 
-    private function handleAttachmentUpload()
+    private function handleAttachmentUpload($fieldName = 'attachment')
     {
-        if (empty($_FILES['attachment']['name'])) {
+        if (empty($_FILES[$fieldName]['name'])) {
             return null;
         }
 
-        if (!isset($_FILES['attachment']['error']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK) {
+        if (
+            isset($_FILES[$fieldName]['error'])
+            && in_array($_FILES[$fieldName]['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
+        ) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment exceeds the ' . MAX_ATTACHMENT_SIZE_MB . ' MB limit.']);
+        }
+
+        if (!isset($_FILES[$fieldName]['error']) || $_FILES[$fieldName]['error'] !== UPLOAD_ERR_OK) {
             throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'File upload failed. Please try again.']);
         }
 
-        if (($_FILES['attachment']['size'] ?? 0) > 10 * 1024 * 1024) {
-            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment exceeds the 10 MB limit.']);
+        if (($_FILES[$fieldName]['size'] ?? 0) > MAX_ATTACHMENT_SIZE_BYTES) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment exceeds the ' . MAX_ATTACHMENT_SIZE_MB . ' MB limit.']);
         }
 
-        $tmpPath = $_FILES['attachment']['tmp_name'] ?? '';
+        $tmpPath = $_FILES[$fieldName]['tmp_name'] ?? '';
         if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
             throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Invalid uploaded file.']);
         }
@@ -322,7 +363,7 @@ class Documents extends Controller
             throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Only PDF, JPG, PNG, GIF, and WEBP attachments are allowed.']);
         }
 
-        $extension = strtolower(pathinfo($_FILES['attachment']['name'], PATHINFO_EXTENSION));
+        $extension = strtolower(pathinfo($_FILES[$fieldName]['name'], PATHINFO_EXTENSION));
         $validExtensions = [$allowedMimeTypes[$mimeType]];
         if ($mimeType === 'image/jpeg') {
             $validExtensions[] = 'jpeg';
@@ -390,6 +431,11 @@ class Documents extends Controller
     private function buildVerificationUrl($qrToken)
     {
         return buildUrl('/document/verify/' . rawurlencode((string) $qrToken));
+    }
+
+    private function isQrPrintEnabled()
+    {
+        return defined('ENABLE_QR_PRINT') && ENABLE_QR_PRINT === true;
     }
 
 
@@ -501,6 +547,7 @@ class Documents extends Controller
         $formAction = URLROOT . '/documents/store';
         $cancelUrl = URLROOT . '/documents';
         $showAttachmentHint = false;
+        $nextPrefix = $this->documentModel->getNextPrefix((int) $_SESSION['department_id']);
         $errors = $state['errors'];
         $formMessage = $state['message'];
         require_once '../app/views/documents/create.php';
@@ -577,6 +624,32 @@ class Documents extends Controller
         }
     }
 
+    private function canCurrentStaffReturnDocument($document, $routeRole, $deptId, $departmentManagerReceived = false)
+    {
+        if ($this->isManager() || !$document || $departmentManagerReceived || ($document['status'] ?? '') === 'Returned') {
+            return false;
+        }
+
+        if (!in_array($document['status'] ?? '', $this->releasableStatuses(), true)) {
+            return false;
+        }
+
+        if ($routeRole) {
+            return ((int) ($routeRole['is_cleared'] ?? 0) !== 1)
+                && (($routeRole['route_type'] ?? '') === 'THRU' || $this->documentModel->isThruCleared((int) $document['id']));
+        }
+
+        return (int) ($document['destination_department_id'] ?? 0) === (int) $deptId
+            && in_array($document['status'] ?? '', $this->releasableStatuses(), true);
+    }
+
+    private function canCurrentStaffResolveReturn($openReturn, $deptId)
+    {
+        return !$this->isManager()
+            && $openReturn
+            && (int) ($openReturn['releasing_department_id'] ?? 0) === (int) $deptId;
+    }
+
     private function renderForwardForm($document)
     {
         $state = pullFormState('document_forward_' . (int) $document['id'], $this->forwardFormDefaults());
@@ -604,7 +677,9 @@ class Documents extends Controller
             $statusCounts = [
                 'Draft' => 0,
                 'Released' => 0,
-                'Received' => 0
+                'Received' => 0,
+                'Returned' => 0,
+                'Re-released' => 0
             ];
 
             foreach ($documents as $document) {
@@ -851,11 +926,15 @@ class Documents extends Controller
                     throw new ValidationException('Draft documents cannot be received.');
                 }
 
+                if ($document['status'] === 'Returned') {
+                    throw new ValidationException('Returned documents must be corrected and re-released before receipt.');
+                }
+
                 if ($route['route_type'] !== 'THRU' && !$this->documentModel->isThruCleared($documentId)) {
                     throw new ValidationException('Document is waiting for THRU clearance.');
                 }
             } else {
-                if ($document['status'] !== 'Released') {
+                if (!in_array($document['status'], $this->releasableStatuses(), true)) {
                     throw new ValidationException('Only released documents can be received.');
                 }
 
@@ -896,6 +975,202 @@ class Documents extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'documents.receive', 'document_id' => $documentId]);
             flash('error', 'We could not receive that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function returnDocument($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if ($this->isManager()) {
+                throw new AuthorizationException('Only receiving department staff can return documents.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $deptId = (int) $_SESSION['department_id'];
+            $routeRole = $this->documentModel->getDepartmentRouteRole($documentId, $deptId);
+            if (!$this->canCurrentStaffReturnDocument($document, $routeRole, $deptId, $this->departmentManagerHasReceived($documentId, $deptId))) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $reason = trim($_POST['return_reason'] ?? '');
+            $remarks = trim($_POST['return_remarks'] ?? '');
+            $attachmentIssue = trim($_POST['attachment_issue'] ?? '');
+            $allowedIssues = ['Incorrect attachment', 'Missing page', 'Wrong file', 'Unreadable file'];
+            $errors = [];
+
+            if ($reason === '') {
+                $errors['return_reason'] = 'Reason for return is required.';
+            }
+
+            if ($remarks === '') {
+                $errors['return_remarks'] = 'Remarks/details are required.';
+            }
+
+            if ($attachmentIssue !== '' && !in_array($attachmentIssue, $allowedIssues, true)) {
+                $errors['attachment_issue'] = 'Select a valid attachment issue.';
+            }
+
+            if (!empty($errors)) {
+                throw new ValidationException('Please provide the return reason and details.', $errors);
+            }
+
+            $this->documentModel->returnDocument(
+                $documentId,
+                (int) $_SESSION['user_id'],
+                $deptId,
+                $reason,
+                $attachmentIssue,
+                $remarks
+            );
+
+            $openReturn = $this->documentModel->getOpenReturn($documentId);
+            $releasingDepartmentId = $openReturn ? (int) $openReturn['releasing_department_id'] : (int) $document['origin_department_id'];
+
+            $this->notificationModel->notifyDepartmentStaffUsers(
+                [$releasingDepartmentId],
+                'Document returned',
+                $document['prefix'] . ' was returned due to attachment issue.',
+                '/documents/show/' . $documentId,
+                (int) $_SESSION['user_id']
+            );
+
+            flash('success', 'Document returned to the releasing department.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to return that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.returnDocument', 'document_id' => $documentId]);
+            flash('error', 'We could not return that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function uploadCorrectedAttachment($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            $document = $this->documentModel->findById($documentId);
+            $openReturn = $this->documentModel->getOpenReturn($documentId);
+            $deptId = (int) $_SESSION['department_id'];
+
+            if (!$document || !$openReturn) {
+                throw new NotFoundException('Returned document not found.');
+            }
+
+            if (!$this->canCurrentStaffResolveReturn($openReturn, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            if (($document['status'] ?? '') !== 'Returned') {
+                throw new ValidationException('Only returned documents can receive a corrected attachment.');
+            }
+
+            $replacementReason = trim($_POST['replacement_reason'] ?? '');
+            if ($replacementReason === '') {
+                throw new ValidationException('Reason for replacement is required.', ['replacement_reason' => 'Reason for replacement is required.']);
+            }
+
+            $filename = $this->handleAttachmentUpload('corrected_attachment');
+            if ($filename === null) {
+                throw new ValidationException('Please attach the corrected file.', ['attachment' => 'Corrected attachment is required.']);
+            }
+
+            $this->documentModel->replaceReturnedAttachment(
+                $documentId,
+                $filename,
+                (int) $_SESSION['user_id'],
+                $deptId,
+                $replacementReason
+            );
+
+            flash('success', 'Corrected attachment uploaded. You can now re-release the document.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to replace that attachment.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Returned document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.uploadCorrectedAttachment', 'document_id' => $documentId]);
+            flash('error', 'We could not upload the corrected attachment right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function reRelease($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            $document = $this->documentModel->findById($documentId);
+            $openReturn = $this->documentModel->getOpenReturn($documentId);
+            $deptId = (int) $_SESSION['department_id'];
+
+            if (!$document || !$openReturn) {
+                throw new NotFoundException('Returned document not found.');
+            }
+
+            if (!$this->canCurrentStaffResolveReturn($openReturn, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            if (!$this->documentModel->hasReplacementForReturn((int) $openReturn['id'])) {
+                throw new ValidationException('Upload a corrected attachment before re-releasing this document.');
+            }
+
+            $this->documentModel->reReleaseReturnedDocument(
+                $documentId,
+                (int) $_SESSION['user_id'],
+                $deptId
+            );
+
+            $this->notificationModel->notifyDepartmentStaffUsers(
+                [(int) $openReturn['returned_department_id']],
+                'Document re-released',
+                $document['prefix'] . ' was re-released with a corrected attachment.',
+                '/documents/show/' . $documentId,
+                (int) $_SESSION['user_id']
+            );
+
+            flash('success', 'Document re-released successfully.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to re-release that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Returned document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.reRelease', 'document_id' => $documentId]);
+            flash('error', 'We could not re-release that document right now. Please try again.', 'error');
             redirect('/documents/show/' . $documentId, 303);
         }
     }
@@ -1033,6 +1308,7 @@ class Documents extends Controller
             }
             foreach ($logs as &$log) {
                 $log['remarks'] = $this->replaceForwardedDepartmentIdsWithCodes((string) ($log['remarks'] ?? ''), $departmentCodeMap);
+                $log['remarks'] = $this->simplifyTimelineRemarks($log);
             }
             unset($log);
             $routing = $this->documentModel->getRoutingByDocument($documentId);
@@ -1049,6 +1325,16 @@ class Documents extends Controller
             $recipientActionDetails = null;
             $referencedDocument = null;
             $latestRecipientRoute = $this->documentModel->getLatestRouteForDepartment($documentId, $deptId);
+            $openReturn = $this->documentModel->getOpenReturn($documentId);
+            $attachmentHistory = $this->documentModel->getAttachmentHistory($documentId);
+            $hasReplacementForOpenReturn = $openReturn
+                ? $this->documentModel->hasReplacementForReturn((int) $openReturn['id'])
+                : false;
+            $canReturnDocument = $this->canCurrentStaffReturnDocument($document, $routeRole, $deptId, $this->departmentManagerHasReceived($documentId, $deptId));
+            $canResolveReturn = $this->canCurrentStaffResolveReturn($openReturn, $deptId);
+            $canReplaceReturnedAttachment = $canResolveReturn && ($document['status'] ?? '') === 'Returned';
+            $canReReleaseReturnedDocument = $canReplaceReturnedAttachment && $hasReplacementForOpenReturn;
+            $returnIssueOptions = ['Incorrect attachment', 'Missing page', 'Wrong file', 'Unreadable file'];
 
             if (!empty($document['reference_document_id']) && $this->documentModel->canDepartmentViewDocument((int) $document['reference_document_id'], $deptId)) {
                 $referencedDocument = $this->documentModel->findById((int) $document['reference_document_id']);
@@ -1089,9 +1375,15 @@ class Documents extends Controller
                 throw new NotFoundException('Attachment not found.');
             }
 
-            $qrToken = $this->documentModel->ensureQrToken($documentId);
-            $verificationUrl = $this->buildVerificationUrl($qrToken);
-            $qrCodeDataUri = QrCodeService::generateSvgDataUri($verificationUrl, 4);
+            $qrPrintEnabled = $this->isQrPrintEnabled();
+            $verificationUrl = '';
+            $qrCodeDataUri = '';
+            // Temporarily Disabled – QR Code Printing Feature
+            if ($qrPrintEnabled) {
+                $qrToken = $this->documentModel->ensureQrToken($documentId);
+                $verificationUrl = $this->buildVerificationUrl($qrToken);
+                $qrCodeDataUri = QrCodeService::generateSvgDataUri($verificationUrl, 4);
+            }
             $attachmentType = $this->getAttachmentViewerType($attachmentPath);
             $sourceUrl = URLROOT . '/documents/source/' . $documentId;
             $previewUrl = $sourceUrl;
@@ -1172,14 +1464,26 @@ class Documents extends Controller
                 throw new ValidationException('Printable PDF view is only available for PDF attachments.');
             }
 
-            $qrToken = $this->documentModel->ensureQrToken($documentId);
-            $verificationUrl = $this->buildVerificationUrl($qrToken);
+            $downloadName = basename((string) ($document['attachment'] ?? ('document-' . $documentId . '.pdf')));
 
-            PdfOverlayService::streamStampedPdf(
-                $attachmentPath,
-                $verificationUrl,
-                basename((string) ($document['attachment'] ?? ('document-' . $documentId . '.pdf')))
-            );
+            // Temporarily Disabled – QR Code Printing Feature
+            if ($this->isQrPrintEnabled()) {
+                $qrToken = $this->documentModel->ensureQrToken($documentId);
+                $verificationUrl = $this->buildVerificationUrl($qrToken);
+
+                PdfOverlayService::streamStampedPdf(
+                    $attachmentPath,
+                    $verificationUrl,
+                    $downloadName
+                );
+                exit;
+            }
+
+            header('Content-Type: application/pdf');
+            header('Content-Length: ' . (string) filesize($attachmentPath));
+            header('Content-Disposition: inline; filename="' . rawurlencode($downloadName) . '"');
+            header('X-Content-Type-Options: nosniff');
+            readfile($attachmentPath);
             exit;
         } catch (NotFoundException $e) {
             flash('error', 'Attachment not found.', 'error');

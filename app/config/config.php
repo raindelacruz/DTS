@@ -33,3 +33,8 @@ if ($configuredAppUrl !== '') {
 define('SITENAME', 'NFA Document Tracking System');
 define('UPLOAD_ROOT', dirname(__DIR__, 2) . '/storage/uploads');
 define('LEGACY_UPLOAD_ROOT', dirname(__DIR__, 2) . '/public/uploads');
+define('MAX_ATTACHMENT_SIZE_MB', 100);
+define('MAX_ATTACHMENT_SIZE_BYTES', MAX_ATTACHMENT_SIZE_MB * 1024 * 1024);
+
+// Temporarily Disabled – QR Code Printing Feature
+define('ENABLE_QR_PRINT', false);

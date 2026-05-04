@@ -7,7 +7,21 @@ class User {
     public function __construct() {
         $this->db = new Database;
         $this->ensureSchema();
-        $this->ensureManagerRoles();
+    }
+
+    public static function roles()
+    {
+        return [
+            'admin' => 'Administrator',
+            'manager' => 'Manager',
+            'staff' => 'Staff',
+            'custodian' => 'Custodian'
+        ];
+    }
+
+    public static function roleExists($role)
+    {
+        return array_key_exists((string) $role, self::roles());
     }
 
     public function login($id_number, $password) {
@@ -98,6 +112,19 @@ class User {
         return $this->db->execute();
     }
 
+    public function updateRole($id, $role)
+    {
+        $this->db->query("
+            UPDATE users
+            SET role = :role
+            WHERE id = :id
+        ");
+        $this->db->bind(':role', $role);
+        $this->db->bind(':id', $id);
+
+        return $this->db->execute();
+    }
+
     public function findById($id)
     {
         $this->db->query("SELECT * FROM users WHERE id = :id LIMIT 1");
@@ -160,7 +187,7 @@ class User {
                 lastname VARCHAR(100) NOT NULL,
                 email VARCHAR(150) DEFAULT NULL,
                 department_id INT(11) NOT NULL,
-                role VARCHAR(20) NOT NULL DEFAULT 'user',
+                role VARCHAR(20) NOT NULL DEFAULT 'staff',
                 status VARCHAR(20) NOT NULL DEFAULT 'inactive',
                 password VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -193,18 +220,6 @@ class User {
             ");
             $this->db->execute();
         }
-    }
-
-    private function ensureManagerRoles()
-    {
-        $managerIds = ['000001', '000002', '000006'];
-        $placeholders = implode(',', array_fill(0, count($managerIds), '?'));
-
-        $this->db->query("UPDATE users SET role = 'manager' WHERE id_number IN ($placeholders)");
-        foreach ($managerIds as $index => $idNumber) {
-            $this->db->bind($index + 1, $idNumber);
-        }
-        $this->db->execute();
     }
 
     private function columnExists($table, $column)

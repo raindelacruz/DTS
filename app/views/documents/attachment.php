@@ -2,6 +2,7 @@
 $attachmentType = $attachmentType ?? 'unsupported';
 $verificationUrl = $verificationUrl ?? '';
 $qrCodeDataUri = $qrCodeDataUri ?? '';
+$qrPrintEnabled = $qrPrintEnabled ?? (defined('ENABLE_QR_PRINT') && ENABLE_QR_PRINT === true);
 $sourceUrl = $sourceUrl ?? '';
 $previewUrl = $previewUrl ?? $sourceUrl;
 ?>
@@ -101,6 +102,7 @@ $previewUrl = $previewUrl ?? $sourceUrl;
             height: auto;
             background: #fff;
         }
+        <?php if ($qrPrintEnabled): ?>
         .qr-overlay {
             position: absolute;
             top: calc(31% - 96px);
@@ -128,6 +130,14 @@ $previewUrl = $previewUrl ?? $sourceUrl;
             letter-spacing: 0.04em;
             text-transform: uppercase;
         }
+        @media (max-width: 1100px) {
+            .qr-overlay {
+                top: calc(28% - 96px);
+                right: calc(8% + 48px);
+                width: 114px;
+            }
+        }
+        <?php endif; ?>
         .attachment-fallback {
             padding: 48px 24px;
             text-align: center;
@@ -138,22 +148,6 @@ $previewUrl = $previewUrl ?? $sourceUrl;
             color: var(--text-muted);
             line-height: 1.6;
         }
-        .pdf-print-note {
-            margin: 12px auto 0;
-            width: min(100%, 1120px);
-            color: var(--text-muted);
-            font-size: 13px;
-            line-height: 1.5;
-            text-align: center;
-        }
-        @media (max-width: 1100px) {
-            .qr-overlay {
-                top: calc(28% - 96px);
-                right: calc(8% + 48px);
-                width: 114px;
-            }
-        }
-
         @media print {
             @page { margin: 12mm; }
             html, body { background: #fff; }
@@ -186,6 +180,7 @@ $previewUrl = $previewUrl ?? $sourceUrl;
                 max-width: 100%;
                 page-break-inside: avoid;
             }
+            <?php if ($qrPrintEnabled): ?>
             .qr-overlay {
                 position: absolute;
                 top: 56.6mm;
@@ -201,9 +196,7 @@ $previewUrl = $previewUrl ?? $sourceUrl;
             .qr-overlay-label {
                 font-size: 7pt;
             }
-            .pdf-print-note {
-                display: none;
-            }
+            <?php endif; ?>
         }
     </style>
 </head>
@@ -214,7 +207,7 @@ $previewUrl = $previewUrl ?? $sourceUrl;
                 <h1 class="viewer-title"><?php echo htmlspecialchars($document['title'] ?? 'Attachment', ENT_QUOTES, 'UTF-8'); ?></h1>
                 <div class="viewer-meta">
                     <?php echo htmlspecialchars($document['prefix'] ?? '', ENT_QUOTES, 'UTF-8'); ?>
-                    <?php if ($verificationUrl !== ''): ?>
+                    <?php if ($qrPrintEnabled && $verificationUrl !== ''): ?>
                         | Verify via QR
                     <?php endif; ?>
                 </div>
@@ -223,7 +216,7 @@ $previewUrl = $previewUrl ?? $sourceUrl;
                 <a href="<?php echo htmlspecialchars(URLROOT . '/documents/show/' . (int) $document['id'], ENT_QUOTES, 'UTF-8'); ?>" class="viewer-button secondary">Back</a>
                 <a href="<?php echo htmlspecialchars($sourceUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" class="viewer-button secondary">Open Original</a>
                 <?php if ($attachmentType === 'pdf'): ?>
-                    <a href="<?php echo htmlspecialchars(URLROOT . '/documents/printable/' . (int) $document['id'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" class="viewer-button">Print With QR</a>
+                    <a href="<?php echo htmlspecialchars(URLROOT . '/documents/printable/' . (int) $document['id'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" class="viewer-button">Print Attachment</a>
                 <?php else: ?>
                     <button type="button" class="viewer-button" onclick="window.print()">Print Attachment</button>
                 <?php endif; ?>
@@ -232,7 +225,8 @@ $previewUrl = $previewUrl ?? $sourceUrl;
 
         <div class="viewer-stage">
             <div class="attachment-frame">
-                <?php if ($attachmentType === 'image'): ?>
+                <?php // Temporarily Disabled – QR Code Printing Feature ?>
+                <?php if ($qrPrintEnabled && $attachmentType === 'image' && $qrCodeDataUri !== ''): ?>
                     <div class="qr-overlay">
                         <img src="<?php echo htmlspecialchars($qrCodeDataUri, ENT_QUOTES, 'UTF-8'); ?>" alt="Document verification QR code">
                         <div class="qr-overlay-label">Scan to verify document</div>
@@ -260,9 +254,6 @@ $previewUrl = $previewUrl ?? $sourceUrl;
                 <?php endif; ?>
             </div>
         </div>
-        <?php if ($attachmentType === 'pdf'): ?>
-            <div class="pdf-print-note">Use <strong>Print With QR</strong> to open the print-ready PDF with the verification QR applied.</div>
-        <?php endif; ?>
     </div>
 </body>
 </html>

@@ -181,7 +181,7 @@ class Auth extends Controller
                     'email' => $values['email'],
                     'department_id' => (int) $values['department_id'],
                     'password' => $password,
-                    'role' => 'user',
+                    'role' => 'staff',
                     'status' => 'inactive'
                 ]);
 
