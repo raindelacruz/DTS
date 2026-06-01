@@ -90,6 +90,7 @@ class Document
         }
 
         $this->ensureReturnTables();
+        $this->ensureAssignmentTable();
     }
 
     private function columnExists($table, $column)
@@ -190,6 +191,31 @@ class Document
                 KEY idx_document_attachment_history_document (document_id),
                 KEY idx_document_attachment_history_return (return_id),
                 KEY idx_document_attachment_history_active (document_id, is_active)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    }
+
+    private function ensureAssignmentTable()
+    {
+        $this->db->exec("
+            CREATE TABLE IF NOT EXISTS document_assignments (
+                id INT(11) NOT NULL AUTO_INCREMENT,
+                document_id INT(11) NOT NULL,
+                assigned_by_user_id INT(11) NOT NULL,
+                assigned_by_department_id INT(11) NOT NULL,
+                assigned_to_user_id INT(11) NOT NULL,
+                assigned_to_department_id INT(11) NOT NULL,
+                assignment_type ENUM('INTERNAL') NOT NULL DEFAULT 'INTERNAL',
+                instructions TEXT DEFAULT NULL,
+                status ENUM('Pending','Completed','Cancelled') NOT NULL DEFAULT 'Pending',
+                assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME DEFAULT NULL,
+                completed_by INT(11) DEFAULT NULL,
+                PRIMARY KEY (id),
+                KEY idx_document_assignments_document (document_id),
+                KEY idx_document_assignments_assignee (assigned_to_user_id),
+                KEY idx_document_assignments_department (assigned_to_department_id),
+                KEY idx_document_assignments_status (status)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
     }
@@ -531,11 +557,44 @@ class Document
     public function getLatestRouteForDepartment($documentId, $departmentId)
     {
         $stmt = $this->db->prepare("
-            SELECT r.instructions, r.routed_at, from_dept.division_name AS from_department_name
+            SELECT
+                r.instructions,
+                r.routed_at,
+                from_dept.division_name AS from_department_name,
+                to_dept.division_name AS to_department_name
             FROM document_routes r
             JOIN departments from_dept ON r.from_department_id = from_dept.id
+            JOIN departments to_dept ON r.to_department_id = to_dept.id
             WHERE r.document_id = :document_id
             AND r.to_department_id = :department_id
+            ORDER BY r.id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'document_id' => $documentId,
+            'department_id' => $departmentId
+        ]);
+
+        $route = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $route ?: null;
+    }
+
+    public function getLatestChildRouteFromDepartment($documentId, $departmentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                r.instructions,
+                r.routed_at,
+                from_dept.division_name AS from_department_name,
+                to_dept.division_name AS to_department_name
+            FROM document_routes r
+            JOIN departments from_dept ON r.from_department_id = from_dept.id
+            JOIN departments to_dept ON r.to_department_id = to_dept.id
+            WHERE r.document_id = :document_id
+            AND r.from_department_id = :department_id
+            AND r.routing_type = 'DELEGATE'
+            AND to_dept.parent_id = :department_id
             ORDER BY r.id DESC
             LIMIT 1
         ");
@@ -1885,6 +1944,233 @@ class Document
         ]);
 
         return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function getActiveStaffByDepartment($department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                id,
+                firstname,
+                middle_initial,
+                lastname,
+                email
+            FROM users
+            WHERE department_id = :department_id
+            AND role = 'staff'
+            AND status = 'active'
+            ORDER BY lastname ASC, firstname ASC
+        ");
+
+        $stmt->execute(['department_id' => (int) $department_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function findActiveStaffInDepartment($user_id, $department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                id,
+                firstname,
+                middle_initial,
+                lastname,
+                email
+            FROM users
+            WHERE id = :user_id
+            AND department_id = :department_id
+            AND role = 'staff'
+            AND status = 'active'
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'user_id' => (int) $user_id,
+            'department_id' => (int) $department_id
+        ]);
+
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $user ?: null;
+    }
+
+    private function formatUserName($user)
+    {
+        $middle = !empty($user['middle_initial']) ? $user['middle_initial'] . '. ' : '';
+        return trim(($user['firstname'] ?? '') . ' ' . $middle . ($user['lastname'] ?? ''));
+    }
+
+    public function getCurrentInternalAssignment($document_id, $department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                da.*,
+                CONCAT(u.firstname, ' ', IFNULL(CONCAT(u.middle_initial, '. '), ''), u.lastname) AS assigned_to_name,
+                CONCAT(assigner.firstname, ' ', IFNULL(CONCAT(assigner.middle_initial, '. '), ''), assigner.lastname) AS assigned_by_name
+            FROM document_assignments da
+            JOIN users u ON da.assigned_to_user_id = u.id
+            JOIN users assigner ON da.assigned_by_user_id = assigner.id
+            WHERE da.document_id = :document_id
+            AND da.assigned_to_department_id = :department_id
+            AND da.assignment_type = 'INTERNAL'
+            AND da.status IN ('Pending','Completed')
+            ORDER BY FIELD(da.status, 'Pending', 'Completed'), da.assigned_at DESC, da.id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'document_id' => (int) $document_id,
+            'department_id' => (int) $department_id
+        ]);
+
+        $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $assignment ?: null;
+    }
+
+    public function getCurrentInternalAssignmentForUser($document_id, $user_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT *
+            FROM document_assignments
+            WHERE document_id = :document_id
+            AND assigned_to_user_id = :user_id
+            AND assignment_type = 'INTERNAL'
+            AND status = 'Pending'
+            ORDER BY assigned_at DESC, id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'document_id' => (int) $document_id,
+            'user_id' => (int) $user_id
+        ]);
+
+        $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $assignment ?: null;
+    }
+
+    public function assignDocumentInternally($document_id, $assigned_to_user_id, $assigned_by_user_id, $department_id, $instructions = '')
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $assignee = $this->findActiveStaffInDepartment($assigned_to_user_id, $department_id);
+            if (!$assignee) {
+                throw new Exception('Select an active staff member from your division.');
+            }
+
+            $cancelExisting = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Cancelled'
+                WHERE document_id = :document_id
+                AND assigned_to_department_id = :department_id
+                AND assignment_type = 'INTERNAL'
+                AND status = 'Pending'
+            ");
+
+            $cancelExisting->execute([
+                'document_id' => (int) $document_id,
+                'department_id' => (int) $department_id
+            ]);
+
+            $insert = $this->db->prepare("
+                INSERT INTO document_assignments (
+                    document_id,
+                    assigned_by_user_id,
+                    assigned_by_department_id,
+                    assigned_to_user_id,
+                    assigned_to_department_id,
+                    assignment_type,
+                    instructions,
+                    status
+                ) VALUES (
+                    :document_id,
+                    :assigned_by_user_id,
+                    :assigned_by_department_id,
+                    :assigned_to_user_id,
+                    :assigned_to_department_id,
+                    'INTERNAL',
+                    :instructions,
+                    'Pending'
+                )
+            ");
+
+            $insert->execute([
+                'document_id' => (int) $document_id,
+                'assigned_by_user_id' => (int) $assigned_by_user_id,
+                'assigned_by_department_id' => (int) $department_id,
+                'assigned_to_user_id' => (int) $assigned_to_user_id,
+                'assigned_to_department_id' => (int) $department_id,
+                'instructions' => trim((string) $instructions) !== '' ? trim((string) $instructions) : null
+            ]);
+
+            $assignmentId = (int) $this->db->lastInsertId();
+            $remarks = 'Assigned to ' . $this->formatUserName($assignee);
+            $instructions = trim((string) $instructions);
+            if ($instructions !== '') {
+                $remarks .= "\nInstruction: " . $instructions;
+            }
+
+            $this->addDocumentLog(
+                $document_id,
+                'Internally Delegated',
+                $assigned_by_user_id,
+                $department_id,
+                $remarks
+            );
+
+            $this->db->commit();
+            return $assignmentId;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function completeInternalAssignment($document_id, $user_id, $department_id, $remarks = '')
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $assignment = $this->getCurrentInternalAssignmentForUser($document_id, $user_id);
+            if (!$assignment || (int) $assignment['assigned_to_department_id'] !== (int) $department_id) {
+                throw new Exception('No active internal assignment found.');
+            }
+
+            $update = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Completed',
+                    completed_at = NOW(),
+                    completed_by = :completed_by
+                WHERE id = :id
+                AND status = 'Pending'
+            ");
+
+            $update->execute([
+                'id' => (int) $assignment['id'],
+                'completed_by' => (int) $user_id
+            ]);
+
+            $logRemarks = trim((string) $remarks) !== ''
+                ? trim((string) $remarks)
+                : 'Internal assignment completed';
+
+            $this->addDocumentLog(
+                $document_id,
+                'Internal Assignment Completed',
+                $user_id,
+                $department_id,
+                $logRemarks
+            );
+
+            $this->db->commit();
+            return (int) $assignment['assigned_by_user_id'];
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
     }
     public function getAllDepartments()
     {

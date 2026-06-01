@@ -23,7 +23,7 @@ Primary implementation references:
 | Role | Responsibilities and Allowed Actions |
 |---|---|
 | Staff | Register and log in after activation, create documents, edit own department drafts, upload initial attachments, release own department drafts, receive routed documents, return released documents before manager action, upload corrected attachments for returned documents when their department is the releasing office, re-release corrected returned documents, view allowed documents and attachments, update own profile department and email. |
-| Manager | View documents allowed to the manager's department, perform manager receipt after staff receipt, clear THRU routes, note CC routes, forward eligible documents for action, view routing and timeline. Managers cannot perform the first staff receipt and cannot return documents. |
+| Manager | View documents allowed to the manager's department, perform manager receipt after staff receipt, clear THRU routes, note CC routes, forward eligible documents for action, delegate received division-level work to staff within the same division when acting as a division manager, view routing and timeline. Managers cannot perform the first staff receipt and cannot return documents. |
 | Administrator | Access user management, activate and deactivate users, update user roles, receive notifications for new registrations, and use normal authenticated screens. Administrator cannot deactivate their own account. |
 | Custodian | Defined in the `users.role` enum and `User::roles()`, but no distinct custodian-specific workflow was found in the current controllers or views. |
 
@@ -46,6 +46,7 @@ Important role controls:
 | Document Lists | Documents, Incoming, and Outgoing list pages with keyword, status, type, and date filters. |
 | Document Details | Main action page for release, receive, return, corrected attachment upload, re-release, manager receive, THRU clearance, CC notation, forwarding, routing display, attachment access, return notice, attachment history, and timeline. |
 | Routing | Stores document movement in `document_routes` using `THRU`, `TO`, `CC`, and `DELEGATE`. |
+| Internal Staff Assignment | Stores division manager to staff assignments in `document_assignments` after a delegated division document has been received and acknowledged. |
 | Return and Re-upload | Records returns in `document_returns` and replacement files in `document_attachment_history`. |
 | Attachments | Uploads PDF and image attachments, previews attachments, streams source files, supports print-ready PDF view when QR print is enabled. |
 | Notifications | Sends in-app notifications to admins, department staff, managers, releasing offices, and returned offices depending on workflow events. |
@@ -69,12 +70,14 @@ Important role controls:
 12. A manager in the receiving department may perform `Manager Received` after staff receipt.
 13. A THRU manager may then perform `Clear THRU`; this makes TO, CC, and DELEGATE recipients eligible.
 14. A CC manager may perform `Note CC`.
-15. An eligible parent-department manager may forward a received TO or DELEGATE document for action. Forwarding creates or resets routes and stores action-slip instructions.
-16. If receiving staff return the document, the document becomes `Returned`, the current route becomes `Returned`, an open return record is created, and the releasing department is notified.
-17. The releasing department uploads a corrected attachment with a replacement reason.
-18. After a replacement exists, the releasing department re-releases the document.
-19. The document becomes `Re-released`, the open return is resolved, the returned route is reset to `Pending`, and the receiving office is notified.
-20. The receiving office can receive the corrected document and continue the normal workflow.
+15. A division manager who received a parent-to-division DELEGATE route may internally delegate the task to active staff within the same division.
+16. Assigned division staff handle the task and may mark the internal assignment completed.
+17. An eligible parent-department manager may forward a received TO or DELEGATE document for action. Forwarding creates or resets routes and stores action-slip instructions.
+18. If receiving staff return the document, the document becomes `Returned`, the current route becomes `Returned`, an open return record is created, and the releasing department is notified.
+19. The releasing department uploads a corrected attachment with a replacement reason.
+20. After a replacement exists, the releasing department re-releases the document.
+21. The document becomes `Re-released`, the open return is resolved, the returned route is reset to `Pending`, and the receiving office is notified.
+22. The receiving office can receive the corrected document and continue the normal workflow.
 
 ## 5. Detailed Workflow by Process
 
@@ -317,6 +320,32 @@ System behavior:
 - A `Forwarded` log is added with target codes and action-slip details.
 - Target departments are notified.
 
+### 5.8.1 Division-Level Internal Staff Delegation
+
+Internal staff delegation is available only after a parent department has routed a document to one of its child divisions through the existing `DELEGATE` route.
+
+Required sequence:
+
+1. Parent department manager forwards or delegates the document to a child division using `DELEGATE`.
+2. Division staff receives the delegated route.
+3. Division manager performs `Manager Received`.
+4. Division manager selects an active staff member from the same division.
+5. System creates a `document_assignments` record with assignment type `INTERNAL`.
+6. System logs `Internally Delegated`.
+7. Selected staff receives a notification.
+8. Document details show the assigned staff member, instructions, and assignment status.
+9. Assigned staff may mark the internal assignment completed.
+10. System logs `Internal Assignment Completed` and notifies the assigning division manager.
+
+Controls:
+
+- The manager must belong to a division department where `departments.parent_id IS NOT NULL`.
+- The document must have a received `DELEGATE` route for that division.
+- Manager receipt is required before internal delegation.
+- The selected assignee must be an active `staff` user in the same division.
+- Internal delegation does not create a new `document_routes` row and does not change the existing `DELEGATE` route.
+- Existing return and re-release behavior remains tied to the current department route.
+
 ### 5.9 Tracking Document Status
 
 Users track documents through:
@@ -433,6 +462,8 @@ Routing controls:
 - THRU must be received or cleared before TO, CC, and DELEGATE receipt.
 - Forwarding targets are limited to another parent department or the manager's own child department.
 - Parent department is required for forwarding.
+- Division manager internal delegation is limited to active staff in the same division after staff receipt and manager receipt.
+- Internal staff assignment uses `document_assignments`; it does not alter `document_routes`.
 
 Attachment controls:
 
@@ -480,6 +511,8 @@ The system records document activity in `document_logs`. Current implemented log
 | Cleared THRU | THRU manager clears the document. |
 | Noted CC | CC manager notes the document. |
 | Forwarded | Manager forwards document with action-slip details. |
+| Internally Delegated | Division manager assigns a delegated division document to staff within the same division. |
+| Internal Assignment Completed | Assigned staff marks the internal assignment completed. |
 
 Each log stores:
 
@@ -510,6 +543,16 @@ Return records are tracked in `document_returns`, including:
 - Remarks
 - Open or resolved status
 - Returned and resolved timestamps
+
+Internal staff assignments are tracked in `document_assignments`, including:
+
+- Document ID
+- Assigning manager and department
+- Assigned staff and department
+- Assignment type
+- Instructions
+- Pending, completed, or cancelled status
+- Assigned and completed timestamps
 
 ## 10. Exception Scenarios
 

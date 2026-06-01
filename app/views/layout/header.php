@@ -320,6 +320,10 @@
                     <span class="sidebar-icon">+</span>
                     <span>Create Document</span>
                 </a>
+                <a class="sidebar-link <?php echo $currentSection === 'actionSlips' ? 'active' : ''; ?>" href="<?php echo URLROOT; ?>/actionSlips">
+                    <span class="sidebar-icon">A</span>
+                    <span>Department Action Slip</span>
+                </a>
                 <a class="sidebar-link <?php echo $currentSection === 'users' && strpos($currentUrl, 'users/profile') === 0 ? 'active' : ''; ?>" href="<?php echo URLROOT; ?>/users/profile">
                     <span class="sidebar-icon">P</span>
                     <span>My Profile</span>

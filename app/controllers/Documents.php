@@ -34,6 +34,25 @@ class Documents extends Controller
         }
     }
 
+    private function isDivisionDepartment($departmentId)
+    {
+        $department = $this->departmentModel->getDepartmentById((int) $departmentId);
+        return $department && $department['parent_id'] !== null;
+    }
+
+    private function canCurrentManagerDelegateInternally($documentId, $departmentId)
+    {
+        if (!$this->isManager() || !$this->isDivisionDepartment($departmentId)) {
+            return false;
+        }
+
+        $route = $this->documentModel->getDepartmentRouteRole($documentId, $departmentId);
+        return $route
+            && ($route['route_type'] ?? '') === 'DELEGATE'
+            && (int) ($route['is_cleared'] ?? 0) === 1
+            && $this->managerHasAcknowledged($documentId, $departmentId);
+    }
+
     private function getListFilters()
     {
         return [
@@ -1319,6 +1338,121 @@ class Documents extends Controller
         }
     }
 
+    public function delegateToStaff($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $deptId = (int) $_SESSION['department_id'];
+            if (!$this->canCurrentManagerDelegateInternally($documentId, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            if (($document['status'] ?? '') === 'Returned') {
+                throw new ValidationException('Returned documents must be corrected and re-released before internal delegation.');
+            }
+
+            $assignedToUserId = (int) ($_POST['assigned_to_user_id'] ?? 0);
+            $instructions = trim($_POST['internal_instruction'] ?? '');
+
+            if ($assignedToUserId <= 0) {
+                throw new ValidationException('Select a staff member to delegate this document to.');
+            }
+
+            $assignee = $this->documentModel->findActiveStaffInDepartment($assignedToUserId, $deptId);
+            if (!$assignee) {
+                throw new ValidationException('Select an active staff member from your division.');
+            }
+
+            $this->documentModel->assignDocumentInternally(
+                $documentId,
+                $assignedToUserId,
+                (int) $_SESSION['user_id'],
+                $deptId,
+                $instructions
+            );
+
+            $this->notificationModel->create(
+                $assignedToUserId,
+                'Document assigned to you',
+                $document['prefix'] . ' was internally delegated to you.',
+                '/documents/show/' . $documentId
+            );
+
+            flash('success', 'Document delegated to staff successfully.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to delegate this document internally.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.delegateToStaff', 'document_id' => $documentId]);
+            flash('error', 'We could not delegate that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function completeInternalAssignment($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if ($this->isManager()) {
+                throw new AuthorizationException('Only assigned staff can complete internal assignments.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $deptId = (int) $_SESSION['department_id'];
+            $remarks = trim($_POST['completion_remarks'] ?? '');
+            $managerUserId = $this->documentModel->completeInternalAssignment(
+                $documentId,
+                (int) $_SESSION['user_id'],
+                $deptId,
+                $remarks
+            );
+
+            if ($managerUserId > 0 && $managerUserId !== (int) $_SESSION['user_id']) {
+                $this->notificationModel->create(
+                    $managerUserId,
+                    'Internal assignment completed',
+                    $document['prefix'] . ' internal assignment was completed.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Internal assignment marked completed.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to complete this assignment.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.completeInternalAssignment', 'document_id' => $documentId]);
+            flash('error', 'We could not complete that assignment right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
     public function show($id)
     {
         $documentId = (int) $id;
@@ -1360,6 +1494,15 @@ class Documents extends Controller
             $canReplaceReturnedAttachment = $canResolveReturn && ($document['status'] ?? '') === 'Returned';
             $canReReleaseReturnedDocument = $canReplaceReturnedAttachment && $hasReplacementForOpenReturn;
             $returnIssueOptions = ['Incorrect attachment', 'Missing page', 'Wrong file', 'Unreadable file'];
+            $internalAssignment = $this->documentModel->getCurrentInternalAssignment($documentId, $deptId);
+            $canDelegateInternally = $this->canCurrentManagerDelegateInternally($documentId, $deptId)
+                && ($document['status'] ?? '') !== 'Returned';
+            $divisionStaff = $canDelegateInternally
+                ? $this->documentModel->getActiveStaffByDepartment($deptId)
+                : [];
+            $currentUserInternalAssignment = !$isManager
+                ? $this->documentModel->getCurrentInternalAssignmentForUser($documentId, (int) $_SESSION['user_id'])
+                : null;
 
             if (!empty($document['reference_document_id']) && $this->documentModel->canDepartmentViewDocument((int) $document['reference_document_id'], $deptId)) {
                 $referencedDocument = $this->documentModel->findById((int) $document['reference_document_id']);
@@ -1368,6 +1511,16 @@ class Documents extends Controller
             if ($latestRecipientRoute && !empty(trim((string) ($latestRecipientRoute['instructions'] ?? '')))) {
                 $recipientActionDetails = $this->parseActionInstructions($latestRecipientRoute['instructions']);
                 $recipientActionDetails['from_department_name'] = $latestRecipientRoute['from_department_name'] ?? '';
+                $recipientActionDetails['to_department_name'] = $latestRecipientRoute['to_department_name'] ?? '';
+                $recipientActionDetails['context'] = 'incoming';
+            } elseif ($isManager && $isParentDepartment) {
+                $latestForwardedRoute = $this->documentModel->getLatestChildRouteFromDepartment($documentId, $deptId);
+                if ($latestForwardedRoute && !empty(trim((string) ($latestForwardedRoute['instructions'] ?? '')))) {
+                    $recipientActionDetails = $this->parseActionInstructions($latestForwardedRoute['instructions']);
+                    $recipientActionDetails['from_department_name'] = $latestForwardedRoute['from_department_name'] ?? '';
+                    $recipientActionDetails['to_department_name'] = $latestForwardedRoute['to_department_name'] ?? '';
+                    $recipientActionDetails['context'] = 'outgoing';
+                }
             }
 
             require_once '../app/views/documents/view.php';

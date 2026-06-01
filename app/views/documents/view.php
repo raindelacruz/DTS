@@ -79,6 +79,23 @@ $receivableStatuses = ['Released', 'Re-released'];
                     <div class="mt-2 text-body-secondary"><?php echo nl2br(htmlspecialchars($openReturn['remarks'])); ?></div>
                 </div>
             <?php endif; ?>
+            <?php if (!empty($internalAssignment)): ?>
+                <div class="mt-4 p-3 rounded-3" style="background:#f0fdf4; border:1px solid #bbf7d0;">
+                    <div class="fw-bold mb-1">Internal Staff Assignment</div>
+                    <div class="small text-muted mb-2">
+                        Assigned to <?php echo htmlspecialchars($internalAssignment['assigned_to_name']); ?>
+                        by <?php echo htmlspecialchars($internalAssignment['assigned_by_name']); ?>
+                        on <?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($internalAssignment['assigned_at']))); ?>
+                    </div>
+                    <div><span class="fw-semibold">Status:</span> <?php echo htmlspecialchars($internalAssignment['status']); ?></div>
+                    <?php if (!empty($internalAssignment['completed_at'])): ?>
+                        <div><span class="fw-semibold">Completed:</span> <?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($internalAssignment['completed_at']))); ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($internalAssignment['instructions'])): ?>
+                        <div class="mt-2 text-body-secondary"><?php echo nl2br(htmlspecialchars($internalAssignment['instructions'])); ?></div>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
     <div class="col-lg-4">
@@ -89,8 +106,10 @@ $receivableStatuses = ['Released', 'Re-released'];
                     <div class="app-card p-3 mb-2" style="background:#fffaf0; border:1px solid #f1d58a; box-shadow:none;">
                         <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
                             <div>
-                                <div class="fw-bold">Forwarder Instruction</div>
-                                <?php if (!empty($recipientActionDetails['from_department_name'])): ?>
+                                <div class="fw-bold">Action Slip</div>
+                                <?php if (($recipientActionDetails['context'] ?? 'incoming') === 'outgoing' && !empty($recipientActionDetails['to_department_name'])): ?>
+                                    <div class="text-muted small">Forwarded to <?php echo htmlspecialchars($recipientActionDetails['to_department_name']); ?></div>
+                                <?php elseif (!empty($recipientActionDetails['from_department_name'])): ?>
                                     <div class="text-muted small">From <?php echo htmlspecialchars($recipientActionDetails['from_department_name']); ?></div>
                                 <?php endif; ?>
                             </div>
@@ -191,6 +210,42 @@ $receivableStatuses = ['Released', 'Re-released'];
                     <form action="<?php echo URLROOT; ?>/documents/noteCc/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
                         <button type="submit" class="btn btn-warning w-100" onclick="return confirm('Note this CC document?');">Note CC</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canDelegateInternally)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/delegateToStaff/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Delegate to Staff</div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold" for="assigned_to_user_id">Staff member</label>
+                            <select id="assigned_to_user_id" name="assigned_to_user_id" class="form-select" required>
+                                <option value="">Select staff</option>
+                                <?php foreach ($divisionStaff as $staff): ?>
+                                    <?php
+                                    $staffName = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? ''));
+                                    ?>
+                                    <option value="<?php echo (int) $staff['id']; ?>"><?php echo htmlspecialchars($staffName); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="internal_instruction">Instruction</label>
+                            <textarea id="internal_instruction" name="internal_instruction" class="form-control" rows="3"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-outline-dark w-100" onclick="return confirm('Delegate this document to the selected staff member?');">Delegate to Staff</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($currentUserInternalAssignment)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/completeInternalAssignment/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Complete Internal Assignment</div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="completion_remarks">Remarks</label>
+                            <textarea id="completion_remarks" name="completion_remarks" class="form-control" rows="3"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100" onclick="return confirm('Mark this internal assignment completed?');">Mark Completed</button>
                     </form>
                 <?php endif; ?>
 
