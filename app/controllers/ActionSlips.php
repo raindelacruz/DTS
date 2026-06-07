@@ -345,6 +345,7 @@ class ActionSlips extends Controller
         $wasCompletedByStaff = $status === DepartmentActionSlip::STATUS_COMPLETED
             && $assignedStaffId > 0
             && (int) ($slip['completed_by'] ?? 0) === $assignedStaffId;
+        $isReturnedToStaff = $status === DepartmentActionSlip::STATUS_RETURNED && $assignedStaffId > 0;
 
         return [
             'receive_department' => $isDepartmentManager && $currentDivisionId === 0 && $status === DepartmentActionSlip::STATUS_RELEASED,
@@ -353,12 +354,13 @@ class ActionSlips extends Controller
             'complete_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RETURNED], true),
             'close' => false,
             'receive_division' => $isDivisionManager && $assignedStaffId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
-            'delegate_staff' => $isDivisionManager && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
+            'delegate_staff' => $isDivisionManager && !$isReturnedToStaff && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'complete_division' => $isDivisionManager && $assignedStaffId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'confirm_division' => $isDivisionManager && $wasCompletedByStaff,
+            'return_staff_completion' => $isDivisionManager && $wasCompletedByStaff,
             'start_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
-            'complete_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED], true),
-            'return' => false
+            'complete_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
+            'return' => $isDivisionManager && $wasCompletedByStaff
         ];
     }
 
@@ -460,10 +462,13 @@ class ActionSlips extends Controller
                 throw new AuthorizationException('Unauthorized action.');
             }
 
+            $wasReturned = ($slip['status'] ?? '') === DepartmentActionSlip::STATUS_RETURNED;
             $attachment = $this->handleUpload('completion_attachment', 'action_slips/completions');
             $this->slipModel->completeByStaff($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), $attachment);
-            $this->notificationModel->notifyDepartmentManagers([$this->currentDepartmentId()], 'Action slip completed by staff', $slip['slip_number'] . ' was marked completed by staff.', '/actionSlips/show/' . $slipId, $this->currentUserId());
-            flash('success', 'Action slip marked completed by staff.', 'success');
+            $title = $wasReturned ? 'Action slip resubmitted by staff' : 'Action slip completed by staff';
+            $message = $wasReturned ? $slip['slip_number'] . ' was resubmitted by staff.' : $slip['slip_number'] . ' was marked completed by staff.';
+            $this->notificationModel->notifyDepartmentManagers([$this->currentDepartmentId()], $title, $message, '/actionSlips/show/' . $slipId, $this->currentUserId());
+            flash('success', $wasReturned ? 'Action slip resubmitted to the division manager.' : 'Action slip marked completed by staff.', 'success');
         });
     }
 
@@ -505,16 +510,30 @@ class ActionSlips extends Controller
     public function returnSlip($id)
     {
         $this->handleAction($id, function ($slipId, $slip) {
-            if (!$this->allowedActions($slip)['return']) {
+            $actions = $this->allowedActions($slip);
+            if (!$actions['return']) {
                 throw new AuthorizationException('Unauthorized action.');
             }
             $remarks = trim($_POST['remarks'] ?? '');
             if ($remarks === '') {
                 throw new ValidationException('Remarks are required when returning an action slip.');
             }
-            $returnTargetDepartmentId = $this->slipModel->returnSlip($slipId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
-            if ($returnTargetDepartmentId > 0) {
-                $this->notificationModel->notifyDepartmentManagers([$returnTargetDepartmentId], 'Action slip returned', $slip['slip_number'] . ' was returned for your review.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+            if (!empty($actions['return_staff_completion'])) {
+                $reason = trim($_POST['return_reason'] ?? '');
+                $allowedReasons = ['Did not pass standards', 'Change of instruction', 'Other'];
+                if (!in_array($reason, $allowedReasons, true)) {
+                    throw new ValidationException('Select a valid return reason.');
+                }
+                $remarks = 'Reason: ' . $reason . "\n" . $remarks;
+                $staffId = $this->slipModel->returnStaffCompletion($slipId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
+                if ($staffId > 0) {
+                    $this->notificationModel->create($staffId, 'Action slip returned', $slip['slip_number'] . ' was returned for revision.', '/actionSlips/show/' . $slipId);
+                }
+            } else {
+                $returnTargetDepartmentId = $this->slipModel->returnSlip($slipId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
+                if ($returnTargetDepartmentId > 0) {
+                    $this->notificationModel->notifyDepartmentManagers([$returnTargetDepartmentId], 'Action slip returned', $slip['slip_number'] . ' was returned for your review.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+                }
             }
             flash('success', 'Action slip returned.', 'success');
         });

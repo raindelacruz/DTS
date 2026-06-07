@@ -11,6 +11,25 @@ $statusClasses = [
     'Re-released' => 'background:#dbeafe; color:#1e40af;'
 ];
 $receivableStatuses = ['Released', 'Re-released'];
+
+$renderTimelineRemarks = function ($log) use ($document) {
+    $remarks = (string) ($log['remarks'] ?? '');
+    $action = (string) ($log['action'] ?? '');
+
+    if ($action === 'Internal Assignment Completed' && preg_match('/(^|\R)Attachment:\s*(.+)$/', $remarks, $matches, PREG_OFFSET_CAPTURE)) {
+        $prefix = substr($remarks, 0, $matches[0][1]);
+        $filename = trim($matches[2][0]);
+        $attachmentUrl = URLROOT . '/documents/internalAssignmentAttachment/' . (int) $document['id'] . '/' . rawurlencode($filename);
+        $prefixHtml = nl2br(htmlspecialchars(rtrim($prefix)));
+        $separator = trim($prefix) !== '' ? '<br>' : '';
+
+        return $prefixHtml
+            . $separator
+            . '<a href="' . htmlspecialchars($attachmentUrl) . '" target="_blank">Attachment</a>';
+    }
+
+    return nl2br(htmlspecialchars($remarks));
+};
 ?>
 
 <div class="page-hero">
@@ -90,6 +109,14 @@ $receivableStatuses = ['Released', 'Re-released'];
                     <div><span class="fw-semibold">Status:</span> <?php echo htmlspecialchars($internalAssignment['status']); ?></div>
                     <?php if (!empty($internalAssignment['completed_at'])): ?>
                         <div><span class="fw-semibold">Completed:</span> <?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($internalAssignment['completed_at']))); ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($internalAssignment['completion_attachment'])): ?>
+                        <div class="mt-2">
+                            <a href="<?php echo URLROOT; ?>/documents/internalAssignmentAttachment/<?php echo (int) $document['id']; ?>" target="_blank" class="btn btn-sm btn-outline-success">View Completion Attachment</a>
+                        </div>
+                    <?php endif; ?>
+                    <?php if (!empty($internalAssignment['return_remarks'])): ?>
+                        <div class="mt-2"><span class="fw-semibold">Return remarks:</span> <?php echo nl2br(htmlspecialchars($internalAssignment['return_remarks'])); ?></div>
                     <?php endif; ?>
                     <?php if (!empty($internalAssignment['instructions'])): ?>
                         <div class="mt-2 text-body-secondary"><?php echo nl2br(htmlspecialchars($internalAssignment['instructions'])); ?></div>
@@ -237,15 +264,46 @@ $receivableStatuses = ['Released', 'Re-released'];
                     </form>
                 <?php endif; ?>
 
-                <?php if (!empty($currentUserInternalAssignment)): ?>
-                    <form action="<?php echo URLROOT; ?>/documents/completeInternalAssignment/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                <?php if (!empty($canReceiveInternalAssignment)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/receiveInternalAssignment/<?php echo $document['id']; ?>" method="POST" class="m-0">
+                        <?php echo csrfInput(); ?>
+                        <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Receive this internal assignment?');">Receive Internal Assignment</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canCompleteInternalAssignment)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/completeInternalAssignment/<?php echo $document['id']; ?>" method="POST" enctype="multipart/form-data" class="app-card p-3 mt-2" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                         <?php echo csrfInput(); ?>
                         <div class="fw-bold mb-3">Complete Internal Assignment</div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold" for="completion_attachment">Completion attachment</label>
+                            <input type="file" id="completion_attachment" name="completion_attachment" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp" required>
+                            <div class="form-text">Maximum size: <?php echo (int) MAX_ATTACHMENT_SIZE_MB; ?> MB.</div>
+                        </div>
                         <div class="mb-3">
                             <label class="form-label small fw-semibold" for="completion_remarks">Remarks</label>
                             <textarea id="completion_remarks" name="completion_remarks" class="form-control" rows="3"></textarea>
                         </div>
                         <button type="submit" class="btn btn-success w-100" onclick="return confirm('Mark this internal assignment completed?');">Mark Completed</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canReturnInternalAssignment)): ?>
+                    <?php if (!empty($canConfirmInternalAssignment)): ?>
+                        <form action="<?php echo URLROOT; ?>/documents/confirmInternalAssignment/<?php echo $document['id']; ?>" method="POST" class="m-0">
+                            <?php echo csrfInput(); ?>
+                            <button type="submit" class="btn btn-success w-100" onclick="return confirm('Confirm this internal assignment completion?');">Confirm Completion</button>
+                        </form>
+                    <?php endif; ?>
+
+                    <form action="<?php echo URLROOT; ?>/documents/returnInternalAssignment/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#fff7ed; border:1px solid #fed7aa; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Return Internal Assignment</div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="internal_return_remarks">Remarks for staff</label>
+                            <textarea id="internal_return_remarks" name="internal_return_remarks" class="form-control" rows="3" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Return this internal assignment to staff?');">Return to Staff</button>
                     </form>
                 <?php endif; ?>
 
@@ -296,7 +354,7 @@ $receivableStatuses = ['Released', 'Re-released'];
                                     <td><?php echo htmlspecialchars($log['user_name']); ?></td>
                                     <td><?php echo htmlspecialchars($log['department_name']); ?></td>
                                     <td><?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($log['timestamp']))); ?></td>
-                                    <td class="text-muted"><?php echo nl2br(htmlspecialchars($log['remarks'])); ?></td>
+                                    <td class="text-muted"><?php echo $renderTimelineRemarks($log); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>

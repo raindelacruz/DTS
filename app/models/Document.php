@@ -207,10 +207,13 @@ class Document
                 assigned_to_department_id INT(11) NOT NULL,
                 assignment_type ENUM('INTERNAL') NOT NULL DEFAULT 'INTERNAL',
                 instructions TEXT DEFAULT NULL,
-                status ENUM('Pending','Completed','Cancelled') NOT NULL DEFAULT 'Pending',
+                status ENUM('Pending','Received','Completed','Confirmed','Returned','Cancelled') NOT NULL DEFAULT 'Pending',
                 assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 completed_at DATETIME DEFAULT NULL,
                 completed_by INT(11) DEFAULT NULL,
+                completion_attachment VARCHAR(255) DEFAULT NULL,
+                returned_at DATETIME DEFAULT NULL,
+                return_remarks TEXT DEFAULT NULL,
                 PRIMARY KEY (id),
                 KEY idx_document_assignments_document (document_id),
                 KEY idx_document_assignments_assignee (assigned_to_user_id),
@@ -218,6 +221,37 @@ class Document
                 KEY idx_document_assignments_status (status)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        if (!$this->enumColumnIncludes('document_assignments', 'status', 'Received') || !$this->enumColumnIncludes('document_assignments', 'status', 'Confirmed') || !$this->enumColumnIncludes('document_assignments', 'status', 'Returned')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                MODIFY status ENUM('Pending','Received','Completed','Confirmed','Returned','Cancelled') NOT NULL DEFAULT 'Pending'
+            ");
+        }
+
+        if (!$this->columnExists('document_assignments', 'completion_attachment')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                ADD COLUMN completion_attachment VARCHAR(255) DEFAULT NULL
+                AFTER completed_by
+            ");
+        }
+
+        if (!$this->columnExists('document_assignments', 'returned_at')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                ADD COLUMN returned_at DATETIME DEFAULT NULL
+                AFTER completion_attachment
+            ");
+        }
+
+        if (!$this->columnExists('document_assignments', 'return_remarks')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                ADD COLUMN return_remarks TEXT DEFAULT NULL
+                AFTER returned_at
+            ");
+        }
     }
 
     private function generateQrToken()
@@ -1632,7 +1666,7 @@ class Document
             JOIN users u ON dl.action_by = u.id
             JOIN departments d ON dl.department_id = d.id
             WHERE dl.document_id = :document_id
-            ORDER BY dl.timestamp ASC
+            ORDER BY dl.timestamp DESC, dl.id DESC
         ");
 
         $stmt->execute(['document_id' => $document_id]);
@@ -1762,7 +1796,7 @@ class Document
             JOIN users u ON dl.action_by = u.id
             JOIN departments d ON dl.department_id = d.id
             WHERE dl.document_id = :document_id
-            ORDER BY dl.timestamp ASC
+            ORDER BY dl.timestamp DESC, dl.id DESC
         ");
 
         $stmt->execute(['document_id' => $document_id]);
@@ -2011,8 +2045,8 @@ class Document
             WHERE da.document_id = :document_id
             AND da.assigned_to_department_id = :department_id
             AND da.assignment_type = 'INTERNAL'
-            AND da.status IN ('Pending','Completed')
-            ORDER BY FIELD(da.status, 'Pending', 'Completed'), da.assigned_at DESC, da.id DESC
+            AND da.status IN ('Pending','Received','Completed','Confirmed','Returned')
+            ORDER BY FIELD(da.status, 'Pending', 'Received', 'Completed', 'Confirmed', 'Returned'), da.assigned_at DESC, da.id DESC
             LIMIT 1
         ");
 
@@ -2033,7 +2067,7 @@ class Document
             WHERE document_id = :document_id
             AND assigned_to_user_id = :user_id
             AND assignment_type = 'INTERNAL'
-            AND status = 'Pending'
+            AND status IN ('Pending','Received','Returned')
             ORDER BY assigned_at DESC, id DESC
             LIMIT 1
         ");
@@ -2129,6 +2163,11 @@ class Document
 
     public function completeInternalAssignment($document_id, $user_id, $department_id, $remarks = '')
     {
+        return $this->completeInternalAssignmentWithAttachment($document_id, $user_id, $department_id, $remarks, null);
+    }
+
+    public function receiveInternalAssignment($document_id, $user_id, $department_id)
+    {
         try {
             $this->db->beginTransaction();
 
@@ -2137,23 +2176,77 @@ class Document
                 throw new Exception('No active internal assignment found.');
             }
 
+            if (!in_array($assignment['status'], ['Pending', 'Returned'], true)) {
+                throw new Exception('Internal assignment cannot be received in its current status.');
+            }
+
+            $update = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Received'
+                WHERE id = :id
+                AND status IN ('Pending','Returned')
+            ");
+
+            $update->execute([
+                'id' => (int) $assignment['id']
+            ]);
+
+            $this->addDocumentLog(
+                $document_id,
+                'Internal Assignment Received',
+                $user_id,
+                $department_id,
+                'Internal assignment received by staff'
+            );
+
+            $this->db->commit();
+            return (int) $assignment['assigned_by_user_id'];
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function completeInternalAssignmentWithAttachment($document_id, $user_id, $department_id, $remarks = '', $attachment = null)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $assignment = $this->getCurrentInternalAssignmentForUser($document_id, $user_id);
+            if (!$assignment || (int) $assignment['assigned_to_department_id'] !== (int) $department_id) {
+                throw new Exception('No active internal assignment found.');
+            }
+
+            if (($assignment['status'] ?? '') !== 'Received') {
+                throw new Exception('Receive this internal assignment before marking it completed.');
+            }
+
             $update = $this->db->prepare("
                 UPDATE document_assignments
                 SET status = 'Completed',
                     completed_at = NOW(),
-                    completed_by = :completed_by
+                    completed_by = :completed_by,
+                    completion_attachment = :completion_attachment,
+                    returned_at = NULL,
+                    return_remarks = NULL
                 WHERE id = :id
-                AND status = 'Pending'
+                AND status = 'Received'
             ");
 
             $update->execute([
                 'id' => (int) $assignment['id'],
-                'completed_by' => (int) $user_id
+                'completed_by' => (int) $user_id,
+                'completion_attachment' => $attachment
             ]);
 
             $logRemarks = trim((string) $remarks) !== ''
                 ? trim((string) $remarks)
                 : 'Internal assignment completed';
+            if (!empty($attachment)) {
+                $logRemarks .= "\nAttachment: " . basename((string) $attachment);
+            }
 
             $this->addDocumentLog(
                 $document_id,
@@ -2172,6 +2265,108 @@ class Document
             throw $e;
         }
     }
+
+    public function returnInternalAssignment($document_id, $department_id, $manager_user_id, $remarks)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $assignment = $this->getCurrentInternalAssignment($document_id, $department_id);
+            if (!$assignment || ($assignment['status'] ?? '') !== 'Completed') {
+                throw new Exception('No completed internal assignment is available to return.');
+            }
+
+            $update = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Returned',
+                    returned_at = NOW(),
+                    return_remarks = :return_remarks
+                WHERE id = :id
+                AND status = 'Completed'
+            ");
+
+            $update->execute([
+                'id' => (int) $assignment['id'],
+                'return_remarks' => trim((string) $remarks)
+            ]);
+
+            $this->addDocumentLog(
+                $document_id,
+                'Internal Assignment Returned',
+                $manager_user_id,
+                $department_id,
+                trim((string) $remarks)
+            );
+
+            $this->db->commit();
+            return (int) $assignment['assigned_to_user_id'];
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function internalAssignmentLogHasAttachment($document_id, $department_id, $filename)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM document_logs
+            WHERE document_id = :document_id
+            AND department_id = :department_id
+            AND action = 'Internal Assignment Completed'
+            AND remarks LIKE :attachment_marker
+        ");
+
+        $stmt->execute([
+            'document_id' => (int) $document_id,
+            'department_id' => (int) $department_id,
+            'attachment_marker' => '%Attachment: ' . basename((string) $filename) . '%'
+        ]);
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function confirmInternalAssignment($document_id, $department_id, $manager_user_id)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $assignment = $this->getCurrentInternalAssignment($document_id, $department_id);
+            if (!$assignment || ($assignment['status'] ?? '') !== 'Completed') {
+                throw new Exception('No completed internal assignment is available to confirm.');
+            }
+
+            $update = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Confirmed'
+                WHERE id = :id
+                AND status = 'Completed'
+            ");
+
+            $update->execute([
+                'id' => (int) $assignment['id']
+            ]);
+
+            $this->addDocumentLog(
+                $document_id,
+                'Internal Assignment Confirmed',
+                $manager_user_id,
+                $department_id,
+                'Internal assignment completion confirmed by manager'
+            );
+
+            $this->db->commit();
+            return (int) $assignment['assigned_to_user_id'];
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     public function getAllDepartments()
     {
         $stmt = $this->db->query("SELECT * FROM departments ORDER BY division_name ASC");

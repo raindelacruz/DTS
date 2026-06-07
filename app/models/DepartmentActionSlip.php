@@ -596,7 +596,7 @@ class DepartmentActionSlip
             LEFT JOIN users from_user ON from_user.id = e.from_user_id
             LEFT JOIN users to_user ON to_user.id = e.to_user_id
             WHERE e.slip_id = :slip_id
-            ORDER BY e.created_at ASC, e.id ASC
+            ORDER BY e.created_at DESC, e.id DESC
         ");
         $stmt->execute(['slip_id' => (int) $slipId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -749,13 +749,14 @@ class DepartmentActionSlip
     {
         $slip = $this->requireSlip($slipId);
         $oldStatus = $slip['status'];
+        $action = $oldStatus === self::STATUS_RETURNED ? 'Resubmitted by Staff' : 'Completed by Staff';
 
         $this->updateSlipAndLog($slipId, [
             'status' => self::STATUS_COMPLETED,
             'completed_at' => date('Y-m-d H:i:s'),
             'completed_by' => (int) $actorUserId
         ], [
-            'action' => 'Completed by Staff',
+            'action' => $action,
             'actor_user_id' => $actorUserId,
             'actor_department_id' => $actorDepartmentId,
             'old_status' => $oldStatus,
@@ -763,6 +764,33 @@ class DepartmentActionSlip
             'remarks' => $remarks,
             'attachment' => $attachment
         ]);
+    }
+
+    public function returnStaffCompletion($slipId, $actorUserId, $actorDepartmentId, $remarks = '')
+    {
+        $slip = $this->requireSlip($slipId);
+        $oldStatus = $slip['status'];
+        $staffUserId = (int) ($slip['assigned_staff_id'] ?? 0);
+
+        $this->updateSlipAndLog($slipId, [
+            'status' => self::STATUS_RETURNED,
+            'completed_at' => null,
+            'completed_by' => null,
+            'closed_at' => null,
+            'closed_by' => null
+        ], [
+            'action' => 'Returned by Division Manager',
+            'actor_user_id' => $actorUserId,
+            'actor_department_id' => $actorDepartmentId,
+            'from_department_id' => $actorDepartmentId,
+            'to_department_id' => $actorDepartmentId,
+            'to_user_id' => $staffUserId,
+            'old_status' => $oldStatus,
+            'new_status' => self::STATUS_RETURNED,
+            'remarks' => $remarks
+        ]);
+
+        return $staffUserId;
     }
 
     public function confirmByDivisionManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '')

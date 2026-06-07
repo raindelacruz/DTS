@@ -47,10 +47,13 @@ class Documents extends Controller
         }
 
         $route = $this->documentModel->getDepartmentRouteRole($documentId, $departmentId);
+        $existingAssignment = $this->documentModel->getCurrentInternalAssignment($documentId, $departmentId);
+
         return $route
             && ($route['route_type'] ?? '') === 'DELEGATE'
             && (int) ($route['is_cleared'] ?? 0) === 1
-            && $this->managerHasAcknowledged($documentId, $departmentId);
+            && $this->managerHasAcknowledged($documentId, $departmentId)
+            && !$existingAssignment;
     }
 
     private function getListFilters()
@@ -1421,12 +1424,23 @@ class Documents extends Controller
             }
 
             $deptId = (int) $_SESSION['department_id'];
+            $assignment = $this->documentModel->getCurrentInternalAssignmentForUser($documentId, (int) $_SESSION['user_id']);
+            if (!$assignment || (int) ($assignment['assigned_to_department_id'] ?? 0) !== $deptId || ($assignment['status'] ?? '') !== 'Received') {
+                throw new ValidationException('Receive this internal assignment before marking it completed.');
+            }
+
             $remarks = trim($_POST['completion_remarks'] ?? '');
-            $managerUserId = $this->documentModel->completeInternalAssignment(
+            $attachment = $this->handleAttachmentUpload('completion_attachment');
+            if ($attachment === null) {
+                throw new ValidationException('Upload a completion attachment before marking this assignment completed.');
+            }
+
+            $managerUserId = $this->documentModel->completeInternalAssignmentWithAttachment(
                 $documentId,
                 (int) $_SESSION['user_id'],
                 $deptId,
-                $remarks
+                $remarks,
+                $attachment
             );
 
             if ($managerUserId > 0 && $managerUserId !== (int) $_SESSION['user_id']) {
@@ -1440,6 +1454,9 @@ class Documents extends Controller
 
             flash('success', 'Internal assignment marked completed.', 'success');
             redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
         } catch (AuthorizationException $e) {
             flash('error', 'You are not allowed to complete this assignment.', 'error');
             redirect('/documents', 303);
@@ -1449,6 +1466,153 @@ class Documents extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'documents.completeInternalAssignment', 'document_id' => $documentId]);
             flash('error', 'We could not complete that assignment right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function receiveInternalAssignment($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if ($this->isManager()) {
+                throw new AuthorizationException('Only assigned staff can receive internal assignments.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $managerUserId = $this->documentModel->receiveInternalAssignment(
+                $documentId,
+                (int) $_SESSION['user_id'],
+                (int) $_SESSION['department_id']
+            );
+
+            if ($managerUserId > 0 && $managerUserId !== (int) $_SESSION['user_id']) {
+                $this->notificationModel->create(
+                    $managerUserId,
+                    'Internal assignment received',
+                    $document['prefix'] . ' internal assignment was received by staff.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Internal assignment received.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to receive this assignment.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.receiveInternalAssignment', 'document_id' => $documentId]);
+            flash('error', 'We could not receive that assignment right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function returnInternalAssignment($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can return internal assignments.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $remarks = trim($_POST['internal_return_remarks'] ?? '');
+            if ($remarks === '') {
+                throw new ValidationException('Enter return remarks for the assigned staff.');
+            }
+
+            $staffUserId = $this->documentModel->returnInternalAssignment(
+                $documentId,
+                (int) $_SESSION['department_id'],
+                (int) $_SESSION['user_id'],
+                $remarks
+            );
+
+            if ($staffUserId > 0) {
+                $this->notificationModel->create(
+                    $staffUserId,
+                    'Internal assignment returned',
+                    $document['prefix'] . ' internal assignment was returned for revision.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Internal assignment returned to staff.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to return this assignment.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.returnInternalAssignment', 'document_id' => $documentId]);
+            flash('error', 'We could not return that assignment right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function confirmInternalAssignment($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can confirm internal assignments.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $staffUserId = $this->documentModel->confirmInternalAssignment(
+                $documentId,
+                (int) $_SESSION['department_id'],
+                (int) $_SESSION['user_id']
+            );
+
+            if ($staffUserId > 0) {
+                $this->notificationModel->create(
+                    $staffUserId,
+                    'Internal assignment confirmed',
+                    $document['prefix'] . ' internal assignment completion was confirmed.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Internal assignment completion confirmed.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to confirm this assignment.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.confirmInternalAssignment', 'document_id' => $documentId]);
+            flash('error', 'We could not confirm that assignment right now. Please try again.', 'error');
             redirect('/documents/show/' . $documentId, 303);
         }
     }
@@ -1503,6 +1667,16 @@ class Documents extends Controller
             $currentUserInternalAssignment = !$isManager
                 ? $this->documentModel->getCurrentInternalAssignmentForUser($documentId, (int) $_SESSION['user_id'])
                 : null;
+            $canReceiveInternalAssignment = !$isManager
+                && !empty($currentUserInternalAssignment)
+                && in_array($currentUserInternalAssignment['status'] ?? '', ['Pending', 'Returned'], true);
+            $canCompleteInternalAssignment = !$isManager
+                && !empty($currentUserInternalAssignment)
+                && ($currentUserInternalAssignment['status'] ?? '') === 'Received';
+            $canReturnInternalAssignment = $isManager
+                && !empty($internalAssignment)
+                && ($internalAssignment['status'] ?? '') === 'Completed';
+            $canConfirmInternalAssignment = $canReturnInternalAssignment;
 
             if (!empty($document['reference_document_id']) && $this->documentModel->canDepartmentViewDocument((int) $document['reference_document_id'], $deptId)) {
                 $referencedDocument = $this->documentModel->findById((int) $document['reference_document_id']);
@@ -1534,6 +1708,57 @@ class Documents extends Controller
             reportException($e, ['action' => 'documents.show', 'document_id' => $documentId]);
             flash('error', 'We could not load that document right now.', 'error');
             redirect('/documents', 303);
+        }
+    }
+
+    public function internalAssignmentAttachment($id, $filename = null)
+    {
+        $documentId = (int) $id;
+
+        try {
+            [, $deptId] = $this->authorizeDocumentViewOrFail($documentId);
+            $assignment = $this->documentModel->getCurrentInternalAssignment($documentId, $deptId);
+
+            if (!$assignment || empty($assignment['completion_attachment'])) {
+                throw new NotFoundException('Completion attachment not found.');
+            }
+
+            $isAssignedStaff = (int) ($assignment['assigned_to_user_id'] ?? 0) === (int) $_SESSION['user_id'];
+            $isDivisionManager = $this->isManager() && (int) ($assignment['assigned_by_department_id'] ?? 0) === $deptId;
+            if (!$isAssignedStaff && !$isDivisionManager) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $requestedAttachment = $filename !== null && trim((string) $filename) !== ''
+                ? basename(rawurldecode((string) $filename))
+                : (string) $assignment['completion_attachment'];
+
+            if ($filename !== null && !$this->documentModel->internalAssignmentLogHasAttachment($documentId, $deptId, $requestedAttachment)) {
+                throw new NotFoundException('Completion attachment not found.');
+            }
+
+            $attachmentPath = $this->resolveAttachmentPath($requestedAttachment);
+            if ($attachmentPath === null) {
+                throw new NotFoundException('Completion attachment not found.');
+            }
+
+            $mimeType = $this->detectAttachmentMimeType($attachmentPath);
+            header('Content-Type: ' . $mimeType);
+            header('Content-Length: ' . (string) filesize($attachmentPath));
+            header('Content-Disposition: inline; filename="' . rawurlencode($requestedAttachment) . '"');
+            header('X-Content-Type-Options: nosniff');
+            readfile($attachmentPath);
+            exit;
+        } catch (NotFoundException $e) {
+            flash('error', 'Completion attachment not found.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to view that completion attachment.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.internalAssignmentAttachment', 'document_id' => $documentId]);
+            flash('error', 'We could not open that completion attachment right now.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
         }
     }
 

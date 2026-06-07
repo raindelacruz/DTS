@@ -129,10 +129,11 @@ $statusStyle = [
                 <?php if (!empty($actions['complete_staff'])): ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/completeStaff/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                         <?php echo csrfInput(); ?>
-                        <div class="fw-bold mb-2">Mark as Completed</div>
+                        <?php $isReturnedToStaff = ($slip['status'] ?? '') === 'Returned'; ?>
+                        <div class="fw-bold mb-2"><?php echo $isReturnedToStaff ? 'Resubmit Completed Task' : 'Mark as Completed'; ?></div>
                         <input type="file" name="completion_attachment" class="form-control mb-2" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx">
-                        <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Completion remarks"></textarea>
-                        <button type="submit" class="btn btn-success w-100">Mark as Completed</button>
+                        <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="<?php echo $isReturnedToStaff ? 'Revision remarks' : 'Completion remarks'; ?>"></textarea>
+                        <button type="submit" class="btn btn-success w-100"><?php echo $isReturnedToStaff ? 'Resubmit' : 'Mark as Completed'; ?></button>
                     </form>
                 <?php endif; ?>
 
@@ -169,9 +170,17 @@ $statusStyle = [
                 <?php if (!empty($actions['return'])): ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/returnSlip/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#fff7ed; border:1px solid #fed7aa; box-shadow:none;">
                         <?php echo csrfInput(); ?>
-                        <div class="fw-bold mb-2">Return</div>
-                        <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Reason and instruction" required></textarea>
-                        <button type="submit" class="btn btn-outline-danger w-100">Return</button>
+                        <div class="fw-bold mb-2"><?php echo !empty($actions['return_staff_completion']) ? 'Return to Staff' : 'Return'; ?></div>
+                        <?php if (!empty($actions['return_staff_completion'])): ?>
+                            <select name="return_reason" class="form-select mb-2" required>
+                                <option value="">Select reason</option>
+                                <option value="Did not pass standards">Did not pass standards</option>
+                                <option value="Change of instruction">Change of instruction</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        <?php endif; ?>
+                        <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Reason and revised instruction" required></textarea>
+                        <button type="submit" class="btn btn-outline-danger w-100"><?php echo !empty($actions['return_staff_completion']) ? 'Return to Staff' : 'Return'; ?></button>
                     </form>
                 <?php endif; ?>
 
