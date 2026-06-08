@@ -18,7 +18,7 @@ foreach (($data['users'] ?? []) as $userSummary) {
 
 <div class="instruction-card">
     <h3>Quick Guide</h3>
-    <p>Review new registrations here, activate only verified accounts, and assign each user the correct <strong>role</strong>. Users manage only their own <strong>department</strong> and <strong>email</strong> from the profile page.</p>
+    <p>Review new registrations here, activate only verified accounts, assign each user the correct <strong>role</strong>, and update account <strong>passwords</strong> when needed.</p>
 </div>
 
 <div class="row g-4 mb-4">
@@ -33,7 +33,7 @@ foreach (($data['users'] ?? []) as $userSummary) {
 <div class="app-card p-4">
     <div class="table-responsive">
         <table class="table table-modern align-middle mb-0">
-            <thead><tr><th>ID Number</th><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th><th>Registered</th><th class="text-end">Action</th></tr></thead>
+            <thead><tr><th>ID Number</th><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Password</th><th>Status</th><th>Registered</th><th class="text-end">Action</th></tr></thead>
             <tbody>
                 <?php if (!empty($data['users'])): ?>
                     <?php foreach ($data['users'] as $user): ?>
@@ -55,6 +55,14 @@ foreach (($data['users'] ?? []) as $userSummary) {
                                     <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
                                 </form>
                             </td>
+                            <td style="min-width: 300px;">
+                                <form action="<?php echo URLROOT; ?>/users/updateUserPassword/<?php echo $user->id; ?>" method="POST" class="d-flex gap-2 align-items-center justify-content-start">
+                                    <?php echo csrfInput(); ?>
+                                    <input type="password" name="new_password" class="form-control form-control-sm" placeholder="New password" minlength="6" required aria-label="New password for <?php echo htmlspecialchars(trim($user->firstname . ' ' . $user->lastname)); ?>">
+                                    <input type="password" name="confirm_password" class="form-control form-control-sm" placeholder="Confirm" minlength="6" required aria-label="Confirm password for <?php echo htmlspecialchars(trim($user->firstname . ' ' . $user->lastname)); ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">Update</button>
+                                </form>
+                            </td>
                             <td><span class="badge-soft" style="<?php echo $user->status === 'active' ? 'background:#dcfce7; color:#166534;' : 'background:#e2e8f0; color:#334155;'; ?>"><?php echo htmlspecialchars(ucfirst($user->status)); ?></span></td>
                             <td><?php echo !empty($user->created_at) ? htmlspecialchars(date('M d, Y h:i A', strtotime($user->created_at))) : ''; ?></td>
                             <td class="text-end">
@@ -63,7 +71,7 @@ foreach (($data['users'] ?? []) as $userSummary) {
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <tr><td colspan="8" class="text-center text-muted py-5">No users found.</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted py-5">No users found.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>

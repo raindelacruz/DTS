@@ -125,6 +125,19 @@ class User {
         return $this->db->execute();
     }
 
+    public function updatePassword($id, $password)
+    {
+        $this->db->query("
+            UPDATE users
+            SET password = :password
+            WHERE id = :id
+        ");
+        $this->db->bind(':password', password_hash($password, PASSWORD_DEFAULT));
+        $this->db->bind(':id', $id);
+
+        return $this->db->execute();
+    }
+
     public function findById($id)
     {
         $this->db->query("SELECT * FROM users WHERE id = :id LIMIT 1");

@@ -61,6 +61,7 @@ class Users extends Controller
                 'department_id' => (string) ($user->department_id ?? ''),
                 'email' => (string) ($user->email ?? '')
             ]);
+            $passwordState = pullFormState('user_password', []);
 
             $data = [
                 'user' => $user,
@@ -69,7 +70,9 @@ class Users extends Controller
                 'error' => pullFlash('profile_error')['message'] ?? '',
                 'values' => $state['values'],
                 'errors' => $state['errors'],
-                'message' => $state['message']
+                'message' => $state['message'],
+                'password_errors' => $passwordState['errors'],
+                'password_message' => $passwordState['message']
             ];
 
             $this->view('users/profile', $data);
@@ -124,6 +127,58 @@ class Users extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'users.updateProfile', 'user_id' => $_SESSION['user_id'] ?? null]);
             storeFormState('user_profile', $values, [], 'We could not save your profile right now. Please try again.');
+            redirect('/users/profile', 303);
+        }
+    }
+
+    public function updatePassword()
+    {
+        try {
+            requirePost();
+            validateCsrfOrFail();
+
+            $currentPassword = trim($_POST['current_password'] ?? '');
+            $newPassword = trim($_POST['new_password'] ?? '');
+            $confirmPassword = trim($_POST['confirm_password'] ?? '');
+            $errors = [];
+
+            if ($currentPassword === '') {
+                $errors['current_password'] = 'Current password is required.';
+            }
+
+            if (strlen($newPassword) < 6) {
+                $errors['new_password'] = 'New password must be at least 6 characters.';
+            }
+
+            if ($confirmPassword === '') {
+                $errors['confirm_password'] = 'Please confirm your new password.';
+            } elseif ($newPassword !== $confirmPassword) {
+                $errors['confirm_password'] = 'Passwords do not match.';
+            }
+
+            $user = $this->userModel->findById((int) $_SESSION['user_id']);
+            if (!$user) {
+                throw new NotFoundException('User not found.');
+            }
+
+            if ($currentPassword !== '' && !password_verify($currentPassword, $user->password)) {
+                $errors['current_password'] = 'Current password is incorrect.';
+            }
+
+            if (!empty($errors)) {
+                throw new ValidationException('Please correct the highlighted password fields.', $errors);
+            }
+
+            $this->userModel->updatePassword((int) $_SESSION['user_id'], $newPassword);
+
+            flash('profile_success', 'Password updated successfully.', 'success');
+            redirect('/users/profile', 303);
+        } catch (ValidationException $e) {
+            storeFormState('user_password', [], $e->getErrors(), $e->getMessage());
+            redirect('/users/profile', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'users.updatePassword', 'user_id' => $_SESSION['user_id'] ?? null]);
+            storeFormState('user_password', [], [], 'We could not update your password right now. Please try again.');
             redirect('/users/profile', 303);
         }
     }
@@ -185,6 +240,53 @@ class Users extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'users.updateRole', 'target_user_id' => (int) $id, 'role' => $role]);
             flash('users_error', 'We could not update that role right now. Please try again.', 'error');
+            redirect('/users', 303);
+        }
+    }
+
+    public function updateUserPassword($id)
+    {
+        try {
+            $this->requireAdmin();
+            requirePost();
+            validateCsrfOrFail();
+
+            $newPassword = trim($_POST['new_password'] ?? '');
+            $confirmPassword = trim($_POST['confirm_password'] ?? '');
+
+            $user = $this->userModel->findById((int) $id);
+            if (!$user) {
+                throw new ValidationException('User not found.');
+            }
+
+            if (strlen($newPassword) < 6) {
+                throw new ValidationException('New password must be at least 6 characters.');
+            }
+
+            if ($confirmPassword === '' || $newPassword !== $confirmPassword) {
+                throw new ValidationException('Password confirmation does not match.');
+            }
+
+            $this->userModel->updatePassword((int) $id, $newPassword);
+
+            $this->notificationModel->create(
+                (int) $user->id,
+                'Password updated',
+                'Your account password has been updated by an administrator.',
+                '/users/profile'
+            );
+
+            flash('users_success', 'User password updated successfully.', 'success');
+            redirect('/users', 303);
+        } catch (AuthorizationException $e) {
+            flash('users_error', 'You are not allowed to change user passwords.', 'error');
+            redirect('/dashboard', 303);
+        } catch (ValidationException $e) {
+            flash('users_error', $e->getMessage(), 'error');
+            redirect('/users', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'users.updateUserPassword', 'target_user_id' => (int) $id]);
+            flash('users_error', 'We could not update that password right now. Please try again.', 'error');
             redirect('/users', 303);
         }
     }

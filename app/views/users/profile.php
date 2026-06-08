@@ -6,7 +6,7 @@
 
 <div class="instruction-card">
     <h3>Quick Guide</h3>
-    <p>Use this page to keep your <strong>department</strong> and <strong>email address</strong> current. Other account details are read-only so records stay consistent across the tracking system.</p>
+    <p>Use this page to keep your <strong>department</strong>, <strong>email address</strong>, and <strong>password</strong> current. Other account details are read-only so records stay consistent across the tracking system.</p>
 </div>
 
 <?php if (!empty($data['success'])): ?><div class="alert alert-success app-card border-0 mb-4"><?php echo htmlspecialchars($data['success']); ?></div><?php endif; ?>
@@ -57,6 +57,34 @@
                 <div class="d-flex flex-wrap gap-3 mt-4 pt-2">
                     <button type="submit" class="btn btn-primary">Save Profile</button>
                     <a href="<?php echo URLROOT; ?>/dashboard" class="btn btn-outline-secondary">Back to Dashboard</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="app-card p-4 p-lg-5 mt-4">
+            <form action="<?php echo URLROOT; ?>/users/updatePassword" method="POST">
+                <?php echo csrfInput(); ?>
+                <div class="text-muted small text-uppercase fw-semibold mb-3">Change Password</div>
+                <?php if (!empty($data['password_message'])): ?><div class="alert alert-danger border-0 mb-4"><?php echo htmlspecialchars($data['password_message']); ?></div><?php endif; ?>
+                <div class="row g-4">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Current Password</label>
+                        <input type="password" name="current_password" class="form-control <?php echo !empty($data['password_errors']['current_password']) ? 'is-invalid' : ''; ?>" required>
+                        <?php if (!empty($data['password_errors']['current_password'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($data['password_errors']['current_password']); ?></div><?php endif; ?>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">New Password</label>
+                        <input type="password" name="new_password" class="form-control <?php echo !empty($data['password_errors']['new_password']) ? 'is-invalid' : ''; ?>" minlength="6" required>
+                        <?php if (!empty($data['password_errors']['new_password'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($data['password_errors']['new_password']); ?></div><?php endif; ?>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Confirm Password</label>
+                        <input type="password" name="confirm_password" class="form-control <?php echo !empty($data['password_errors']['confirm_password']) ? 'is-invalid' : ''; ?>" minlength="6" required>
+                        <?php if (!empty($data['password_errors']['confirm_password'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($data['password_errors']['confirm_password']); ?></div><?php endif; ?>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-3 mt-4 pt-2">
+                    <button type="submit" class="btn btn-primary">Update Password</button>
                 </div>
             </form>
         </div>

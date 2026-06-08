@@ -42,6 +42,42 @@
         .field input {
             width: 100%; padding: 14px 16px; border-radius: 16px; border: 1px solid #dbe4ee; font: inherit; box-sizing: border-box;
         }
+        .password-field { position: relative; }
+        .password-field input { padding-right: 52px; }
+        .password-toggle {
+            position: absolute;
+            top: 50%;
+            right: 12px;
+            transform: translateY(-50%);
+            width: 36px;
+            height: 36px;
+            border: 0;
+            border-radius: 12px;
+            background: transparent;
+            color: #64748b;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .password-toggle:hover,
+        .password-toggle:focus {
+            color: #0f766e;
+            background: rgba(15, 118, 110, 0.08);
+            outline: none;
+        }
+        .password-toggle svg {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .password-toggle .icon-eye-off { display: none; }
+        .password-toggle.is-visible .icon-eye { display: none; }
+        .password-toggle.is-visible .icon-eye-off { display: block; }
         .field input.is-invalid { border-color: #dc2626; background: #fff7f7; }
         .field input:focus { outline: none; border-color: rgba(15, 118, 110, 0.55); box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1); }
         .field-error { margin-top: 6px; color: #b91c1c; font-size: 0.85rem; }
@@ -86,7 +122,21 @@
 
             <div class="field">
                 <label for="password">Password</label>
-                <input id="password" type="password" name="password" class="<?php echo !empty($data['errors']['password']) ? 'is-invalid' : ''; ?>" required>
+                <div class="password-field">
+                    <input id="password" type="password" name="password" class="<?php echo !empty($data['errors']['password']) ? 'is-invalid' : ''; ?>" required>
+                    <button type="button" class="password-toggle" aria-label="Show password" aria-pressed="false" data-password-toggle="password">
+                        <svg class="icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <svg class="icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M3 3l18 18"></path>
+                            <path d="M10.6 10.6A2 2 0 0 0 13.4 13.4"></path>
+                            <path d="M9.9 4.2A10.5 10.5 0 0 1 12 4c6.5 0 10 8 10 8a18.2 18.2 0 0 1-3.1 4.4"></path>
+                            <path d="M6.6 6.6C3.8 8.5 2 12 2 12s3.5 8 10 8a9.7 9.7 0 0 0 4.8-1.3"></path>
+                        </svg>
+                    </button>
+                </div>
                 <?php if (!empty($data['errors']['password'])): ?>
                     <div class="field-error"><?php echo htmlspecialchars($data['errors']['password']); ?></div>
                 <?php endif; ?>
@@ -99,5 +149,22 @@
             <a href="<?php echo URLROOT; ?>/auth/register">Register</a>
         </div>
     </div>
+    <script>
+        document.querySelectorAll('[data-password-toggle]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var input = document.getElementById(button.getAttribute('data-password-toggle'));
+                if (!input) {
+                    return;
+                }
+
+                var shouldShow = input.type === 'password';
+                input.type = shouldShow ? 'text' : 'password';
+                button.classList.toggle('is-visible', shouldShow);
+                button.setAttribute('aria-pressed', shouldShow ? 'true' : 'false');
+                button.setAttribute('aria-label', shouldShow ? 'Hide password' : 'Show password');
+                input.focus();
+            });
+        });
+    </script>
 </body>
 </html>
