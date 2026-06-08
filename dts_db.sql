@@ -332,7 +332,11 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`id`, `id_number`, `firstname`, `lastname`, `middle_initial`, `department_id`, `role`, `email`, `password`, `status`, `created_at`) VALUES
-(10, 'SYSADMIN', 'System', 'Administrator', NULL, 1, 'admin', 'sysadmin@nfa.gov.ph', '$2y$10$bnUZzDW8X20gSy/WKkIcDefLwdvo6f07V5foYMd2rfR2oNmfTQ/FG', 'active', '2026-06-08 05:15:37');
+(10, 'SYSADMIN', 'System', 'Administrator', NULL, 1, 'admin', 'sysadmin@nfa.gov.ph', '$2y$10$bnUZzDW8X20gSy/WKkIcDefLwdvo6f07V5foYMd2rfR2oNmfTQ/FG', 'active', '2026-06-08 05:15:37'),
+(11, 'ICTSD-MGR', 'ICTSD', 'Manager', NULL, 12, 'manager', 'ictsd.manager@nfa.gov.ph', '$2y$10$19b0t6jArjFrwLCY2HEdZuQep90z2NcHWB24OMgWHS4q4egm.5sbC', 'active', '2026-06-08 06:00:00'),
+(12, 'ICTSD-STF01', 'ICTSD', 'Staff One', NULL, 12, 'staff', 'ictsd.staff01@nfa.gov.ph', '$2y$10$skJjgIizyA2u1bvewyn2w.SLutvR1YeKDQ4p6U8k4kk7Rk2CUveAq', 'active', '2026-06-08 06:00:00'),
+(13, 'ICTSD-STF02', 'ICTSD', 'Staff Two', NULL, 12, 'staff', 'ictsd.staff02@nfa.gov.ph', '$2y$10$RW8Y2y8BJWmbp.ZANwNUluAMWIOyExknhMtKKRbh.XHSSwCJbnxHS', 'active', '2026-06-08 06:00:00'),
+(14, 'ICTSD-STF03', 'ICTSD', 'Staff Three', NULL, 12, 'staff', 'ictsd.staff03@nfa.gov.ph', '$2y$10$MZIwSbe415zUdG/9YqUc3OTu0zuPlgUtXaSlObZ5L0b2ngaHVs0WO', 'active', '2026-06-08 06:00:00');
 
 --
 -- Indexes for dumped tables
@@ -555,7 +559,7 @@ ALTER TABLE `notifications`
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
 
 --
 -- Constraints for dumped tables

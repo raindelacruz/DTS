@@ -152,7 +152,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                         <div class="text-body-secondary"><?php echo nl2br(htmlspecialchars($recipientActionDetails['instruction'] ?: 'N/A')); ?></div>
                     </div>
                 <?php endif; ?>
-                <?php if (!$isManager && $document['status'] === 'Draft' && $document['origin_department_id'] == $_SESSION['department_id']): ?>
+                <?php if ($document['status'] === 'Draft' && $document['origin_department_id'] == $_SESSION['department_id']): ?>
                     <a href="<?php echo URLROOT; ?>/documents/edit/<?php echo $document['id']; ?>" class="btn btn-outline-secondary w-100">Edit Draft</a>
                     <form action="<?php echo URLROOT; ?>/documents/release/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
@@ -160,7 +160,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                     </form>
                 <?php endif; ?>
 
-                <?php if (!$isManager && in_array($document['status'], $receivableStatuses, true) && (($routeType && !$routeCleared && ($routeType === 'THRU' || $thruCleared)) || (!$routeType && $document['destination_department_id'] == $_SESSION['department_id']))): ?>
+                <?php if (!$isManager && empty($internalAssignment) && in_array($document['status'], $receivableStatuses, true) && (($routeType && !$routeCleared && ($routeType === 'THRU' || $thruCleared)) || (!$routeType && $document['destination_department_id'] == $_SESSION['department_id']))): ?>
                     <form action="<?php echo URLROOT; ?>/documents/receive/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
                         <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Receive this document?');">Receive Document</button>

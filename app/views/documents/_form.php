@@ -4,6 +4,8 @@ $selectedThruDepartmentId = isset($selectedThruDepartmentId) ? (int) $selectedTh
 $selectedToDepartmentIds = array_map('intval', $selectedToDepartmentIds ?? []);
 $selectedCcDepartmentIds = array_map('intval', $selectedCcDepartmentIds ?? []);
 $selectedDelegateDepartmentIds = array_map('intval', $selectedDelegateDepartmentIds ?? []);
+$selectedStaffIds = array_map('intval', $selectedStaffIds ?? []);
+$isDivisionManager = $isDivisionManager ?? false;
 $submitLabel = $submitLabel ?? 'Save Document';
 $formAction = $formAction ?? '';
 $cancelUrl = $cancelUrl ?? (URLROOT . '/documents');
@@ -165,41 +167,82 @@ $formMessage = $formMessage ?? '';
             </div>
             <div class="form-text">Use CC for offices that only need a copy or visibility.</div>
         </div>
-        <div class="col-lg-4">
-            <label class="form-label fw-semibold">Own Division</label>
-            <div class="route-search-wrap">
-                <input
-                    type="search"
-                    class="form-control route-search-input"
-                    placeholder="Search own divisions"
-                    aria-label="Search own divisions"
-                    data-route-search-target="delegate-department-list"
-                >
+        <?php if (!$isDivisionManager): ?>
+            <div class="col-lg-4">
+                <label class="form-label fw-semibold">Own Division</label>
+                <div class="route-search-wrap">
+                    <input
+                        type="search"
+                        class="form-control route-search-input"
+                        placeholder="Search own divisions"
+                        aria-label="Search own divisions"
+                        data-route-search-target="delegate-department-list"
+                    >
+                </div>
+                <div class="route-checkbox-group" id="delegate-department-list" role="group" aria-label="Own Division">
+                    <?php if (!empty($childDepartments)): ?>
+                        <?php foreach ($childDepartments as $dept): ?>
+                            <?php $deptId = (int) $dept['id']; ?>
+                            <label class="route-checkbox-item" for="delegate_department_<?php echo $deptId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($dept['division_name']), ENT_QUOTES, 'UTF-8'); ?>">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    id="delegate_department_<?php echo $deptId; ?>"
+                                    name="delegate_department_ids[]"
+                                    value="<?php echo $deptId; ?>"
+                                    <?php echo in_array($deptId, $selectedDelegateDepartmentIds, true) ? 'checked' : ''; ?>
+                                >
+                                <span><?php echo htmlspecialchars($dept['division_name']); ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="text-muted small">No child divisions are assigned to your department.</div>
+                    <?php endif; ?>
+                    <div class="route-empty-state d-none" data-route-empty>No divisions match your search.</div>
+                </div>
+                <div class="form-text">Select only your department's own child division for internal routing.</div>
+                <?php if (!empty($errors['delegate_department_ids'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($errors['delegate_department_ids']); ?></div><?php endif; ?>
             </div>
-            <div class="route-checkbox-group" id="delegate-department-list" role="group" aria-label="Own Division">
-                <?php if (!empty($childDepartments)): ?>
-                    <?php foreach ($childDepartments as $dept): ?>
-                        <?php $deptId = (int) $dept['id']; ?>
-                        <label class="route-checkbox-item" for="delegate_department_<?php echo $deptId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($dept['division_name']), ENT_QUOTES, 'UTF-8'); ?>">
-                            <input
-                                class="form-check-input"
-                                type="checkbox"
-                                id="delegate_department_<?php echo $deptId; ?>"
-                                name="delegate_department_ids[]"
-                                value="<?php echo $deptId; ?>"
-                                <?php echo in_array($deptId, $selectedDelegateDepartmentIds, true) ? 'checked' : ''; ?>
-                            >
-                            <span><?php echo htmlspecialchars($dept['division_name']); ?></span>
-                        </label>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <div class="text-muted small">No child divisions are assigned to your department.</div>
-                <?php endif; ?>
-                <div class="route-empty-state d-none" data-route-empty>No divisions match your search.</div>
+        <?php else: ?>
+            <div class="col-lg-4">
+                <label class="form-label fw-semibold">Target Staff</label>
+                <div class="route-search-wrap">
+                    <input
+                        type="search"
+                        class="form-control route-search-input"
+                        placeholder="Search staff"
+                        aria-label="Search staff"
+                        data-route-search-target="staff-recipient-list"
+                    >
+                </div>
+                <div class="route-checkbox-group" id="staff-recipient-list" role="group" aria-label="Target Staff">
+                    <?php if (!empty($divisionStaff)): ?>
+                        <?php foreach ($divisionStaff as $staff): ?>
+                            <?php
+                                $staffId = (int) $staff['id'];
+                                $staffName = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? ''));
+                            ?>
+                            <label class="route-checkbox-item" for="assigned_staff_<?php echo $staffId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($staffName), ENT_QUOTES, 'UTF-8'); ?>">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    id="assigned_staff_<?php echo $staffId; ?>"
+                                    name="assigned_staff_ids[]"
+                                    value="<?php echo $staffId; ?>"
+                                    <?php echo in_array($staffId, $selectedStaffIds, true) ? 'checked' : ''; ?>
+                                >
+                                <span><?php echo htmlspecialchars($staffName); ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="text-muted small">No active staff are assigned to your division.</div>
+                    <?php endif; ?>
+                    <div class="route-empty-state d-none" data-route-empty>No staff match your search.</div>
+                </div>
+                <div class="form-text">Select one or more staff members under your division.</div>
+                <?php if (!empty($errors['assigned_staff_ids'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($errors['assigned_staff_ids']); ?></div><?php endif; ?>
             </div>
-            <div class="form-text">Select only your department's own child division for internal routing.</div>
-            <?php if (!empty($errors['delegate_department_ids'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($errors['delegate_department_ids']); ?></div><?php endif; ?>
-        </div>
+        <?php endif; ?>
         <div class="col-12">
             <label class="form-label fw-semibold" for="attachment">Attachment</label>
             <input type="file" id="attachment" name="attachment" class="form-control <?php echo !empty($errors['attachment']) ? 'is-invalid' : ''; ?>" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp">

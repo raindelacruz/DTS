@@ -4,7 +4,63 @@
 $values = $data['values'] ?? [];
 $errors = $data['errors'] ?? [];
 $isParentDepartment = !empty($data['is_parent_department']);
+$selectedStaffIds = array_map('intval', (array) ($values['assigned_staff_ids'] ?? []));
+if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
+    $selectedStaffIds = [(int) $values['assigned_staff_id']];
+}
 ?>
+
+<style>
+    .staff-picker {
+        border: 1px solid #dbe5ef;
+        border-radius: 0.95rem;
+        background: #fff;
+        overflow: hidden;
+    }
+    .staff-picker.is-invalid {
+        border-color: #dc3545;
+    }
+    .staff-picker-search {
+        border: 0;
+        border-bottom: 1px solid #e2e8f0;
+        border-radius: 0;
+    }
+    .staff-picker-search:focus {
+        box-shadow: none;
+        border-color: #b7c7d8;
+    }
+    .staff-picker-list {
+        max-height: 174px;
+        overflow-y: auto;
+        padding: 0.35rem;
+    }
+    .staff-picker-option {
+        min-height: 54px;
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.62rem 0.7rem;
+        border-radius: 0.65rem;
+        cursor: pointer;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .staff-picker-option:hover,
+    .staff-picker-option:has(.form-check-input:checked) {
+        background: #ecfdf5;
+        color: #0f766e;
+    }
+    .staff-picker-empty {
+        display: none;
+        padding: 0.8rem;
+        color: #64748b;
+    }
+    .staff-picker-count {
+        padding: 0.5rem 0.8rem;
+        border-top: 1px solid #e2e8f0;
+        color: #64748b;
+        font-size: 0.85rem;
+    }
+</style>
 
 <div class="page-hero compact">
     <div>
@@ -103,15 +159,25 @@ $isParentDepartment = !empty($data['is_parent_department']);
         </div>
 
         <div class="col-lg-4 col-md-6" data-staff-wrap>
-            <label for="assigned_staff_id" class="form-label fw-semibold">Target Staff</label>
-            <select id="assigned_staff_id" name="assigned_staff_id" class="form-select <?php echo isset($errors['assigned_staff_id']) ? 'is-invalid' : ''; ?>">
-                <option value="">Select staff</option>
-                <?php foreach (($data['division_staff'] ?? []) as $staff): ?>
-                    <?php $name = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? '')); ?>
-                    <option value="<?php echo (int) $staff['id']; ?>" <?php echo ((int) ($values['assigned_staff_id'] ?? 0) === (int) $staff['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($name); ?></option>
-                <?php endforeach; ?>
-            </select>
-            <?php if (isset($errors['assigned_staff_id'])): ?><div class="invalid-feedback"><?php echo htmlspecialchars($errors['assigned_staff_id']); ?></div><?php endif; ?>
+            <label for="staff_search" class="form-label fw-semibold">Target Staff</label>
+            <div class="staff-picker <?php echo isset($errors['assigned_staff_id']) ? 'is-invalid' : ''; ?>" data-staff-picker>
+                <input type="search" id="staff_search" class="form-control staff-picker-search" placeholder="Search staff" autocomplete="off" data-staff-search>
+                <div class="staff-picker-list" data-staff-list>
+                    <?php foreach (($data['division_staff'] ?? []) as $staff): ?>
+                        <?php
+                            $name = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? ''));
+                            $staffId = (int) $staff['id'];
+                        ?>
+                        <label class="staff-picker-option" data-staff-option data-staff-name="<?php echo htmlspecialchars(strtolower($name)); ?>">
+                            <input type="checkbox" name="assigned_staff_ids[]" value="<?php echo $staffId; ?>" class="form-check-input m-0" <?php echo in_array($staffId, $selectedStaffIds, true) ? 'checked' : ''; ?>>
+                            <span><?php echo htmlspecialchars($name); ?></span>
+                        </label>
+                    <?php endforeach; ?>
+                    <div class="staff-picker-empty" data-staff-empty>No staff found.</div>
+                </div>
+                <div class="staff-picker-count" data-staff-count></div>
+            </div>
+            <div class="invalid-feedback <?php echo isset($errors['assigned_staff_id']) ? 'd-block' : ''; ?>" data-staff-error><?php echo htmlspecialchars($errors['assigned_staff_id'] ?? 'Select at least one staff member.'); ?></div>
         </div>
 
         <div class="col-12 d-flex gap-2 justify-content-end pt-2">
@@ -129,8 +195,44 @@ $isParentDepartment = !empty($data['is_parent_department']);
     const staffWrap = document.querySelector('[data-staff-wrap]');
     const department = document.getElementById('receiving_department_id');
     const division = document.getElementById('receiving_division_id');
-    const staff = document.getElementById('assigned_staff_id');
+    const form = document.querySelector('form[action$="/actionSlips/store"]');
+    const staffPicker = document.querySelector('[data-staff-picker]');
+    const staffSearch = document.querySelector('[data-staff-search]');
+    const staffOptions = Array.from(document.querySelectorAll('[data-staff-option]'));
+    const staffChecks = Array.from(document.querySelectorAll('input[name="assigned_staff_ids[]"]'));
+    const staffEmpty = document.querySelector('[data-staff-empty]');
+    const staffCount = document.querySelector('[data-staff-count]');
+    const staffError = document.querySelector('[data-staff-error]');
     const currentDepartmentId = '<?php echo (int) ($_SESSION['department_id'] ?? 0); ?>';
+
+    function selectedStaffCount() {
+        return staffChecks.filter((input) => input.checked).length;
+    }
+
+    function updateStaffState(showError = false) {
+        const count = selectedStaffCount();
+        staffCount.textContent = count === 1 ? '1 staff selected' : `${count} staff selected`;
+
+        const isStaffTarget = level.value === 'Staff';
+        const isInvalid = isStaffTarget && count === 0 && showError;
+        staffPicker.classList.toggle('is-invalid', isInvalid);
+        staffError.classList.toggle('d-block', isInvalid || staffError.textContent.trim() !== 'Select at least one staff member.');
+    }
+
+    function filterStaffOptions() {
+        const term = staffSearch.value.trim().toLowerCase();
+        let visibleCount = 0;
+
+        staffOptions.forEach((option) => {
+            const isVisible = option.getAttribute('data-staff-name').includes(term);
+            option.style.display = isVisible ? '' : 'none';
+            if (isVisible) {
+                visibleCount++;
+            }
+        });
+
+        staffEmpty.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
 
     function refreshTargets() {
         const target = level.value;
@@ -139,7 +241,7 @@ $isParentDepartment = !empty($data['is_parent_department']);
         staffWrap.style.display = target === 'Staff' ? '' : 'none';
         department.required = target === 'Department';
         division.required = target === 'Division';
-        staff.required = target === 'Staff';
+        updateStaffState(false);
 
         Array.from(division.options).forEach((option) => {
             if (!option.value) {
@@ -153,7 +255,18 @@ $isParentDepartment = !empty($data['is_parent_department']);
         });
     }
 
+    staffSearch.addEventListener('input', filterStaffOptions);
+    staffChecks.forEach((input) => input.addEventListener('change', () => updateStaffState(false)));
+    form.addEventListener('submit', (event) => {
+        if (level.value === 'Staff' && selectedStaffCount() === 0) {
+            event.preventDefault();
+            updateStaffState(true);
+            staffSearch.focus();
+        }
+    });
+
     level.addEventListener('change', refreshTargets);
+    filterStaffOptions();
     refreshTargets();
 })();
 </script>

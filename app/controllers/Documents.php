@@ -40,6 +40,11 @@ class Documents extends Controller
         return $department && $department['parent_id'] !== null;
     }
 
+    private function isDivisionManager()
+    {
+        return $this->isManager() && $this->isDivisionDepartment((int) $_SESSION['department_id']);
+    }
+
     private function canCurrentManagerDelegateInternally($documentId, $departmentId)
     {
         if (!$this->isManager() || !$this->isDivisionDepartment($departmentId)) {
@@ -187,7 +192,8 @@ class Documents extends Controller
             'thru_department_id' => '',
             'to_department_ids' => [],
             'cc_department_ids' => [],
-            'delegate_department_ids' => []
+            'delegate_department_ids' => [],
+            'assigned_staff_ids' => []
         ];
     }
 
@@ -217,7 +223,8 @@ class Documents extends Controller
             'thru_department_id' => !empty($source['thru_department_id']) ? (string) ((int) $source['thru_department_id']) : '',
             'to_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['to_department_ids'] ?? [])))),
             'cc_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['cc_department_ids'] ?? [])))),
-            'delegate_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['delegate_department_ids'] ?? []))))
+            'delegate_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['delegate_department_ids'] ?? [])))),
+            'assigned_staff_ids' => array_values(array_unique(array_filter(array_map('intval', $source['assigned_staff_ids'] ?? []))))
         ];
     }
 
@@ -250,10 +257,12 @@ class Documents extends Controller
         $toDepartmentIds = $values['to_department_ids'];
         $ccDepartmentIds = $values['cc_department_ids'];
         $delegateDepartmentIds = $values['delegate_department_ids'];
+        $assignedStaffIds = $values['assigned_staff_ids'];
         $originDepartmentId = (int) $_SESSION['department_id'];
+        $isDivisionManager = $this->isDivisionManager();
 
-        if (empty($toDepartmentIds) && empty($delegateDepartmentIds)) {
-            $errors['to_department_ids'] = 'Select at least one TO department or internal division.';
+        if (empty($toDepartmentIds) && empty($delegateDepartmentIds) && empty($assignedStaffIds)) {
+            $errors['to_department_ids'] = 'Select at least one TO department, internal division, or staff recipient.';
         }
 
         if ($thruDepartmentId !== null) {
@@ -295,6 +304,19 @@ class Documents extends Controller
             $errors['delegate_department_ids'] = 'Internal routing is limited to your own child division only.';
         }
 
+        if (!empty($assignedStaffIds)) {
+            if (!$isDivisionManager) {
+                $errors['assigned_staff_ids'] = 'Only division managers can send documents directly to staff.';
+            } else {
+                foreach ($assignedStaffIds as $staffId) {
+                    if (!$this->documentModel->findActiveStaffInDepartment((int) $staffId, $originDepartmentId)) {
+                        $errors['assigned_staff_ids'] = 'Select active staff members under your division.';
+                        break;
+                    }
+                }
+            }
+        }
+
         if (!empty($errors)) {
             throw new ValidationException('Please correct the highlighted fields.', $errors);
         }
@@ -307,7 +329,8 @@ class Documents extends Controller
             'thru_department_id' => $thruDepartmentId,
             'to_department_ids' => $toDepartmentIds,
             'cc_department_ids' => $ccDepartmentIds,
-            'delegate_department_ids' => $delegateDepartmentIds
+            'delegate_department_ids' => $delegateDepartmentIds,
+            'assigned_staff_ids' => $assignedStaffIds
         ];
     }
 
@@ -571,7 +594,9 @@ class Documents extends Controller
     {
         $state = pullFormState('document_create', $this->documentFormDefaults());
         $departments = $this->departmentModel->getParentDepartments();
-        $childDepartments = $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
+        $isDivisionManager = $this->isDivisionManager();
+        $childDepartments = $isDivisionManager ? [] : $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
+        $divisionStaff = $isDivisionManager ? $this->documentModel->getActiveStaffByDepartment((int) $_SESSION['department_id']) : [];
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -583,6 +608,7 @@ class Documents extends Controller
         $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
         $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
         $selectedDelegateDepartmentIds = array_map('intval', $state['values']['delegate_department_ids'] ?? []);
+        $selectedStaffIds = array_map('intval', $state['values']['assigned_staff_ids'] ?? []);
         $submitLabel = 'Create Document';
         $formAction = URLROOT . '/documents/store';
         $cancelUrl = URLROOT . '/documents';
@@ -610,11 +636,14 @@ class Documents extends Controller
             }, $routing['CC'] ?? []),
             'delegate_department_ids' => array_map(function ($route) {
                 return (int) $route['department_id'];
-            }, $routing['DELEGATE'] ?? [])
+            }, $routing['DELEGATE'] ?? []),
+            'assigned_staff_ids' => $this->documentModel->getInternalAssignmentStaffIds((int) $document['id'])
         ];
         $state = pullFormState('document_edit_' . (int) $document['id'], $defaults);
         $departments = $this->departmentModel->getParentDepartments();
-        $childDepartments = $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
+        $isDivisionManager = $this->isDivisionManager();
+        $childDepartments = $isDivisionManager ? [] : $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
+        $divisionStaff = $isDivisionManager ? $this->documentModel->getActiveStaffByDepartment((int) $_SESSION['department_id']) : [];
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -626,6 +655,7 @@ class Documents extends Controller
         $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
         $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
         $selectedDelegateDepartmentIds = array_map('intval', $state['values']['delegate_department_ids'] ?? []);
+        $selectedStaffIds = array_map('intval', $state['values']['assigned_staff_ids'] ?? []);
         $formAction = URLROOT . '/documents/update/' . (int) $document['id'];
         $submitLabel = 'Save Changes';
         $cancelUrl = URLROOT . '/documents/show/' . (int) $document['id'];
@@ -672,6 +702,10 @@ class Documents extends Controller
     private function canCurrentStaffReturnDocument($document, $routeRole, $deptId, $departmentManagerReceived = false)
     {
         if ($this->isManager() || !$document || $departmentManagerReceived || ($document['status'] ?? '') === 'Returned') {
+            return false;
+        }
+
+        if ($this->documentModel->getCurrentInternalAssignmentForUser((int) $document['id'], (int) $_SESSION['user_id'])) {
             return false;
         }
 
@@ -836,12 +870,12 @@ class Documents extends Controller
             $routingInput = $this->validateDocumentFormValues($values);
             $filename = $this->handleAttachmentUpload();
 
-            $this->documentModel->createDocument([
+            $documentId = $this->documentModel->createDocument([
                 'title' => $routingInput['title'],
                 'particulars' => $routingInput['particulars'],
                 'type' => $routingInput['type'],
                 'origin_department_id' => (int) $_SESSION['department_id'],
-                'destination_department_id' => $routingInput['to_department_ids'][0] ?? $routingInput['delegate_department_ids'][0],
+                'destination_department_id' => $routingInput['to_department_ids'][0] ?? $routingInput['delegate_department_ids'][0] ?? (int) $_SESSION['department_id'],
                 'reference_document_id' => $routingInput['reference_document_id'],
                 'thru_department_id' => $routingInput['thru_department_id'],
                 'to_department_ids' => $routingInput['to_department_ids'],
@@ -850,6 +884,16 @@ class Documents extends Controller
                 'created_by' => (int) $_SESSION['user_id'],
                 'attachment' => $filename
             ]);
+
+            if (!empty($routingInput['assigned_staff_ids'])) {
+                $this->documentModel->replaceDraftInternalAssignments(
+                    $documentId,
+                    $routingInput['assigned_staff_ids'],
+                    (int) $_SESSION['user_id'],
+                    (int) $_SESSION['department_id'],
+                    $routingInput['particulars']
+                );
+            }
 
             flash('success', 'Document created successfully.', 'success');
             redirect('/documents', 303);
@@ -878,6 +922,7 @@ class Documents extends Controller
                 'title' => $routingInput['title'],
                 'particulars' => $routingInput['particulars'],
                 'type' => $routingInput['type'],
+                'destination_department_id' => $routingInput['to_department_ids'][0] ?? $routingInput['delegate_department_ids'][0] ?? (int) $_SESSION['department_id'],
                 'reference_document_id' => $routingInput['reference_document_id'],
                 'thru_department_id' => $routingInput['thru_department_id'],
                 'to_department_ids' => $routingInput['to_department_ids'],
@@ -891,6 +936,13 @@ class Documents extends Controller
             }
 
             $this->documentModel->updateDraftDocument($documentId, $data);
+            $this->documentModel->replaceDraftInternalAssignments(
+                $documentId,
+                $routingInput['assigned_staff_ids'],
+                (int) $_SESSION['user_id'],
+                (int) $_SESSION['department_id'],
+                $routingInput['particulars']
+            );
 
             flash('success', 'Draft updated successfully.', 'success');
             redirect('/documents/show/' . $documentId, 303);
@@ -930,6 +982,17 @@ class Documents extends Controller
                 $document['prefix'] . ' has been released.',
                 $initialDepartmentIds
             );
+
+            $assignedStaffIds = $this->documentModel->getPendingInternalAssignmentUserIds($documentId, (int) $_SESSION['department_id']);
+            if (!empty($assignedStaffIds)) {
+                $this->notificationModel->createMany(
+                    $assignedStaffIds,
+                    'Document assigned to you',
+                    $document['prefix'] . ' was sent to you.',
+                    '/documents/show/' . $documentId,
+                    (int) $_SESSION['user_id']
+                );
+            }
 
             flash('success', 'Document released successfully.', 'success');
             redirect('/documents', 303);

@@ -873,7 +873,7 @@ class Document
             ]);
 
             $this->db->commit();
-            return $prefix;
+            return $documentId;
         } catch (Exception $e) {
             if ($this->db->inTransaction()) {
                 $this->db->rollBack();
@@ -903,7 +903,7 @@ class Document
             $delegateDepartmentIds = array_values(array_map('intval', $data['delegate_department_ids'] ?? []));
             $primaryDestination = !empty($toDepartmentIds)
                 ? (int) $toDepartmentIds[0]
-                : (!empty($delegateDepartmentIds) ? (int) $delegateDepartmentIds[0] : (int) $existingDocument['destination_department_id']);
+                : (!empty($delegateDepartmentIds) ? (int) $delegateDepartmentIds[0] : (int) ($data['destination_department_id'] ?? $existingDocument['destination_department_id']));
             $attachment = array_key_exists('attachment', $data)
                 ? $data['attachment']
                 : $existingDocument['attachment'];
@@ -2059,6 +2059,41 @@ class Document
         return $assignment ?: null;
     }
 
+    public function getInternalAssignmentStaffIds($document_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT assigned_to_user_id
+            FROM document_assignments
+            WHERE document_id = :document_id
+            AND assignment_type = 'INTERNAL'
+            AND status IN ('Pending','Received','Completed','Returned')
+            ORDER BY assigned_at ASC, id ASC
+        ");
+
+        $stmt->execute(['document_id' => (int) $document_id]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public function getPendingInternalAssignmentUserIds($document_id, $department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT assigned_to_user_id
+            FROM document_assignments
+            WHERE document_id = :document_id
+            AND assigned_to_department_id = :department_id
+            AND assignment_type = 'INTERNAL'
+            AND status = 'Pending'
+            ORDER BY assigned_at ASC, id ASC
+        ");
+
+        $stmt->execute([
+            'document_id' => (int) $document_id,
+            'department_id' => (int) $department_id
+        ]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     public function getCurrentInternalAssignmentForUser($document_id, $user_id)
     {
         $stmt = $this->db->prepare("
@@ -2079,6 +2114,95 @@ class Document
 
         $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
         return $assignment ?: null;
+    }
+
+    public function replaceDraftInternalAssignments($document_id, $assigned_to_user_ids, $assigned_by_user_id, $department_id, $instructions = '')
+    {
+        $assignedToUserIds = array_values(array_unique(array_filter(array_map('intval', (array) $assigned_to_user_ids))));
+
+        try {
+            $this->db->beginTransaction();
+
+            $document = $this->findById($document_id);
+            if (!$document) {
+                throw new Exception('Document not found.');
+            }
+
+            if (($document['status'] ?? '') !== 'Draft') {
+                throw new Exception('Staff recipients can only be changed while the document is a draft.');
+            }
+
+            foreach ($assignedToUserIds as $staffId) {
+                if (!$this->findActiveStaffInDepartment($staffId, $department_id)) {
+                    throw new Exception('Select active staff members under your division.');
+                }
+            }
+
+            $cancelExisting = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Cancelled'
+                WHERE document_id = :document_id
+                AND assigned_to_department_id = :department_id
+                AND assignment_type = 'INTERNAL'
+                AND status IN ('Pending','Returned')
+            ");
+
+            $cancelExisting->execute([
+                'document_id' => (int) $document_id,
+                'department_id' => (int) $department_id
+            ]);
+
+            if (!empty($assignedToUserIds)) {
+                $insert = $this->db->prepare("
+                    INSERT INTO document_assignments (
+                        document_id,
+                        assigned_by_user_id,
+                        assigned_by_department_id,
+                        assigned_to_user_id,
+                        assigned_to_department_id,
+                        assignment_type,
+                        instructions,
+                        status
+                    ) VALUES (
+                        :document_id,
+                        :assigned_by_user_id,
+                        :assigned_by_department_id,
+                        :assigned_to_user_id,
+                        :assigned_to_department_id,
+                        'INTERNAL',
+                        :instructions,
+                        'Pending'
+                    )
+                ");
+
+                foreach ($assignedToUserIds as $staffId) {
+                    $insert->execute([
+                        'document_id' => (int) $document_id,
+                        'assigned_by_user_id' => (int) $assigned_by_user_id,
+                        'assigned_by_department_id' => (int) $department_id,
+                        'assigned_to_user_id' => (int) $staffId,
+                        'assigned_to_department_id' => (int) $department_id,
+                        'instructions' => trim((string) $instructions) !== '' ? trim((string) $instructions) : null
+                    ]);
+                }
+
+                $this->addDocumentLog(
+                    $document_id,
+                    'Internally Delegated',
+                    $assigned_by_user_id,
+                    $department_id,
+                    count($assignedToUserIds) === 1 ? 'Draft assigned to 1 staff member' : 'Draft assigned to ' . count($assignedToUserIds) . ' staff members'
+                );
+            }
+
+            $this->db->commit();
+            return true;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
     }
 
     public function assignDocumentInternally($document_id, $assigned_to_user_id, $assigned_by_user_id, $department_id, $instructions = '')
