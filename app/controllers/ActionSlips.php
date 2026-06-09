@@ -69,7 +69,9 @@ class ActionSlips extends Controller
             'urgent' => 0,
             'receiving_level' => $receivingLevel,
             'receiving_department_id' => $receivingLevel === 'Staff' ? (string) ($currentDepartment['parent_id'] ?? '') : '',
+            'receiving_department_ids' => [],
             'receiving_division_id' => $receivingLevel === 'Staff' ? (string) $this->currentDepartmentId() : '',
+            'receiving_division_ids' => [],
             'assigned_staff_id' => '',
             'assigned_staff_ids' => [],
             'required_action' => '',
@@ -135,6 +137,9 @@ class ActionSlips extends Controller
 
             $state = pullFormState('action_slip_create', $this->formDefaults());
             $departmentId = (int) ($state['values']['receiving_department_id'] ?: $this->currentDepartmentId());
+            if (($_SESSION['role'] ?? '') === 'staff') {
+                $departmentId = $this->currentDepartmentId();
+            }
 
             $data = [
                 'values' => $state['values'],
@@ -164,13 +169,23 @@ class ActionSlips extends Controller
             'urgent' => !empty($_POST['urgent']) ? 1 : 0,
             'receiving_level' => trim($_POST['receiving_level'] ?? 'Department'),
             'receiving_department_id' => (int) ($_POST['receiving_department_id'] ?? 0),
+            'receiving_department_ids' => $this->postedDepartmentIds(),
             'receiving_division_id' => (int) ($_POST['receiving_division_id'] ?? 0),
+            'receiving_division_ids' => $this->postedDivisionIds(),
             'assigned_staff_id' => (int) ($_POST['assigned_staff_id'] ?? 0),
             'assigned_staff_ids' => $this->postedStaffIds(),
             'required_action' => trim($_POST['required_action'] ?? ''),
             'deadline' => trim($_POST['deadline'] ?? ''),
             'remarks' => trim($_POST['remarks'] ?? '')
         ];
+        if (empty($values['receiving_department_ids']) && $values['receiving_department_id'] > 0) {
+            $values['receiving_department_ids'] = [$values['receiving_department_id']];
+        }
+        $values['receiving_department_id'] = (int) ($values['receiving_department_ids'][0] ?? $values['receiving_department_id']);
+        if (empty($values['receiving_division_ids']) && $values['receiving_division_id'] > 0) {
+            $values['receiving_division_ids'] = [$values['receiving_division_id']];
+        }
+        $values['receiving_division_id'] = (int) ($values['receiving_division_ids'][0] ?? $values['receiving_division_id']);
         if (empty($values['assigned_staff_ids']) && $values['assigned_staff_id'] > 0) {
             $values['assigned_staff_ids'] = [$values['assigned_staff_id']];
         }
@@ -210,21 +225,31 @@ class ActionSlips extends Controller
                     $this->notificationModel->create((int) $staffId, 'Action slip released', 'A new action slip was released to you.', '/actionSlips/show/' . $slipId);
                 }
             } elseif ($values['receiving_level'] === 'Division') {
-                $slipId = $this->slipModel->create($values + [
-                    'attachment' => $attachment,
-                    'created_by' => $this->currentUserId(),
-                    'actor_department_id' => $this->currentDepartmentId()
-                ]);
-                $createdSlipIds[] = $slipId;
-                $this->notificationModel->notifyDepartmentManagers([$values['receiving_division_id']], 'Action slip released', 'A new action slip was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+                foreach ($values['receiving_division_ids'] as $divisionId) {
+                    $slipValues = $values;
+                    $slipValues['receiving_division_id'] = (int) $divisionId;
+                    $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
+                    $slipId = $this->slipModel->create($slipValues + [
+                        'attachment' => $attachment,
+                        'created_by' => $this->currentUserId(),
+                        'actor_department_id' => $this->currentDepartmentId()
+                    ]);
+                    $createdSlipIds[] = $slipId;
+                    $this->notificationModel->notifyDepartmentManagers([(int) $divisionId], 'Action slip released', 'A new action slip was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+                }
             } else {
-                $slipId = $this->slipModel->create($values + [
-                    'attachment' => $attachment,
-                    'created_by' => $this->currentUserId(),
-                    'actor_department_id' => $this->currentDepartmentId()
-                ]);
-                $createdSlipIds[] = $slipId;
-                $this->notificationModel->notifyDepartmentManagers([$values['receiving_department_id']], 'Action slip released', 'A new action slip was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+                foreach ($values['receiving_department_ids'] as $departmentId) {
+                    $slipValues = $values;
+                    $slipValues['receiving_department_id'] = (int) $departmentId;
+                    $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
+                    $slipId = $this->slipModel->create($slipValues + [
+                        'attachment' => $attachment,
+                        'created_by' => $this->currentUserId(),
+                        'actor_department_id' => $this->currentDepartmentId()
+                    ]);
+                    $createdSlipIds[] = $slipId;
+                    $this->notificationModel->notifyDepartmentManagers([(int) $departmentId], 'Action slip released', 'A new action slip was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+                }
             }
 
             $createdCount = count($createdSlipIds);
@@ -272,8 +297,9 @@ class ActionSlips extends Controller
             'receiving_division_id' => $receivingDivisionId
         ]);
 
-        $this->notificationModel->notifyDepartmentManagers([$receivingDepartmentId], 'Draft action slip created', 'A staff draft action slip is ready for review.', '/actionSlips/show/' . $slipId, $this->currentUserId());
-        flash('success', 'Draft action slip created and sent to your department manager.', 'success');
+        $managerDepartmentId = $receivingDivisionId ?: $receivingDepartmentId;
+        $this->notificationModel->notifyDepartmentManagers([$managerDepartmentId], 'Draft action slip created', 'A staff draft action slip is ready for review.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+        flash('success', 'Draft action slip created and sent to your manager.', 'success');
         redirect('/actionSlips/show/' . $slipId, 303);
     }
 
@@ -289,6 +315,38 @@ class ActionSlips extends Controller
         })));
     }
 
+    private function postedDepartmentIds()
+    {
+        $departmentIds = $_POST['receiving_department_ids'] ?? [];
+        if (!is_array($departmentIds)) {
+            $departmentIds = [$departmentIds];
+        }
+
+        if (empty($departmentIds) && !empty($_POST['receiving_department_id'])) {
+            $departmentIds = [$_POST['receiving_department_id']];
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', $departmentIds), function ($departmentId) {
+            return $departmentId > 0;
+        })));
+    }
+
+    private function postedDivisionIds()
+    {
+        $divisionIds = $_POST['receiving_division_ids'] ?? [];
+        if (!is_array($divisionIds)) {
+            $divisionIds = [$divisionIds];
+        }
+
+        if (empty($divisionIds) && !empty($_POST['receiving_division_id'])) {
+            $divisionIds = [$_POST['receiving_division_id']];
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', $divisionIds), function ($divisionId) {
+            return $divisionId > 0;
+        })));
+    }
+
     private function validateCreateValues($values)
     {
         $errors = [];
@@ -301,18 +359,26 @@ class ActionSlips extends Controller
 
         if ($this->isManager() && $this->isParentDepartment()) {
             if ($values['receiving_level'] === 'Department') {
-                if ((int) $values['receiving_department_id'] <= 0) {
+                $departmentIds = $values['receiving_department_ids'] ?? [];
+                if (empty($departmentIds) && (int) ($values['receiving_department_id'] ?? 0) > 0) {
+                    $departmentIds = [(int) $values['receiving_department_id']];
+                }
+                if (empty($departmentIds)) {
                     $errors['receiving_department_id'] = 'Target department is required.';
-                } elseif (!$this->departmentModel->isParentDepartment((int) $values['receiving_department_id'])) {
+                } elseif (!$this->departmentModel->areParentDepartments($departmentIds)) {
                     $errors['receiving_department_id'] = 'Select a valid department.';
-                } elseif ((int) $values['receiving_department_id'] === $this->currentDepartmentId()) {
+                } elseif (in_array($this->currentDepartmentId(), $departmentIds, true)) {
                     $errors['receiving_department_id'] = 'Select another department.';
                 }
             } elseif ($values['receiving_level'] === 'Division') {
                 $values['receiving_department_id'] = $this->currentDepartmentId();
-                if ((int) $values['receiving_division_id'] <= 0) {
+                $divisionIds = $values['receiving_division_ids'] ?? [];
+                if (empty($divisionIds) && (int) ($values['receiving_division_id'] ?? 0) > 0) {
+                    $divisionIds = [(int) $values['receiving_division_id']];
+                }
+                if (empty($divisionIds)) {
                     $errors['receiving_division_id'] = 'Target division is required.';
-                } elseif (!$this->departmentModel->areChildDepartmentsOfParent([(int) $values['receiving_division_id']], $this->currentDepartmentId())) {
+                } elseif (!$this->departmentModel->areChildDepartmentsOfParent($divisionIds, $this->currentDepartmentId())) {
                     $errors['receiving_division_id'] = 'Select a division under your department.';
                 }
             } else {
@@ -435,7 +501,6 @@ class ActionSlips extends Controller
         $isDepartmentManager = $this->isManager() && $this->isParentDepartment($deptId) && $currentDepartmentId === $deptId;
         $isDivisionManager = $this->isManager() && !$this->isParentDepartment($deptId) && $currentDivisionId === $deptId;
         $isAssignedStaff = $assignedStaffId === $this->currentUserId();
-        $isCreatorStaff = ($_SESSION['role'] ?? '') === 'staff' && (int) ($slip['created_by'] ?? 0) === $this->currentUserId();
         $wasCompletedByStaff = $status === DepartmentActionSlip::STATUS_COMPLETED
             && $assignedStaffId > 0
             && (int) ($slip['completed_by'] ?? 0) === $assignedStaffId;
@@ -443,7 +508,7 @@ class ActionSlips extends Controller
 
         return [
             'receive_department' => $isDepartmentManager && $currentDivisionId === 0 && $status === DepartmentActionSlip::STATUS_RELEASED,
-            'finalize_draft' => $isDepartmentManager && $status === DepartmentActionSlip::STATUS_DRAFT,
+            'finalize_draft' => $status === DepartmentActionSlip::STATUS_DRAFT && ($currentDivisionId > 0 ? $isDivisionManager : $isDepartmentManager),
             'route_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'delegate_division' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'complete_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RETURNED], true),
@@ -453,7 +518,7 @@ class ActionSlips extends Controller
             'complete_division' => $isDivisionManager && $assignedStaffId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'confirm_division' => $isDivisionManager && $wasCompletedByStaff,
             'return_staff_completion' => $isDivisionManager && $wasCompletedByStaff,
-            'start_staff' => $isAssignedStaff && !$isCreatorStaff && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
+            'start_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
             'complete_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'return' => $isDivisionManager && $wasCompletedByStaff
         ];
@@ -471,13 +536,23 @@ class ActionSlips extends Controller
                 'urgent' => !empty($_POST['urgent']) ? 1 : 0,
                 'receiving_level' => trim($_POST['receiving_level'] ?? 'Department'),
                 'receiving_department_id' => (int) ($_POST['receiving_department_id'] ?? 0),
+                'receiving_department_ids' => $this->postedDepartmentIds(),
                 'receiving_division_id' => (int) ($_POST['receiving_division_id'] ?? 0),
+                'receiving_division_ids' => $this->postedDivisionIds(),
                 'assigned_staff_id' => (int) ($_POST['assigned_staff_id'] ?? 0),
                 'assigned_staff_ids' => $this->postedStaffIds(),
                 'required_action' => trim($_POST['required_action'] ?? ''),
                 'deadline' => trim($_POST['deadline'] ?? ''),
                 'remarks' => trim($_POST['remarks'] ?? '')
             ];
+            if (empty($values['receiving_department_ids']) && $values['receiving_department_id'] > 0) {
+                $values['receiving_department_ids'] = [$values['receiving_department_id']];
+            }
+            $values['receiving_department_id'] = (int) ($values['receiving_department_ids'][0] ?? $values['receiving_department_id']);
+            if (empty($values['receiving_division_ids']) && $values['receiving_division_id'] > 0) {
+                $values['receiving_division_ids'] = [$values['receiving_division_id']];
+            }
+            $values['receiving_division_id'] = (int) ($values['receiving_division_ids'][0] ?? $values['receiving_division_id']);
             if (empty($values['assigned_staff_ids']) && $values['assigned_staff_id'] > 0) {
                 $values['assigned_staff_ids'] = [$values['assigned_staff_id']];
             }
@@ -486,6 +561,103 @@ class ActionSlips extends Controller
             $errors = $this->validateCreateValues($values);
             if (!empty($errors)) {
                 throw new ValidationException(reset($errors));
+            }
+
+            if ($values['receiving_level'] === 'Staff' && count($values['assigned_staff_ids']) > 1) {
+                $firstStaffId = (int) array_shift($values['assigned_staff_ids']);
+                $firstValues = $values;
+                $firstValues['assigned_staff_id'] = $firstStaffId;
+                $firstValues['assigned_staff_ids'] = [$firstStaffId];
+                $firstValues = array_merge($firstValues, $this->hiddenCreateValues($firstValues));
+
+                $this->slipModel->releaseDraft($slipId, $firstValues + [
+                    'actor_user_id' => $this->currentUserId(),
+                    'actor_department_id' => $this->currentDepartmentId()
+                ]);
+                $this->notificationModel->create($firstStaffId, 'Action slip released', $slip['slip_number'] . ' was released to you.', '/actionSlips/show/' . $slipId);
+
+                foreach ($values['assigned_staff_ids'] as $staffId) {
+                    $duplicateValues = $values;
+                    $duplicateValues['assigned_staff_id'] = (int) $staffId;
+                    $duplicateValues['assigned_staff_ids'] = [(int) $staffId];
+                    $duplicateValues = array_merge($duplicateValues, $this->hiddenCreateValues($duplicateValues));
+                    $newSlipId = $this->slipModel->createDraft([
+                        'date_received' => $slip['date_received'] ?? $values['date_received'],
+                        'attachment' => $slip['attachment'] ?? null,
+                        'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
+                        'actor_department_id' => $this->currentDepartmentId(),
+                        'receiving_department_id' => (int) $duplicateValues['receiving_department_id'],
+                        'receiving_division_id' => (int) $duplicateValues['receiving_division_id']
+                    ]);
+                    $this->slipModel->releaseDraft($newSlipId, $duplicateValues + [
+                        'actor_user_id' => $this->currentUserId(),
+                        'actor_department_id' => $this->currentDepartmentId()
+                    ]);
+                    $this->notificationModel->create((int) $staffId, 'Action slip released', 'A new action slip was released to you.', '/actionSlips/show/' . $newSlipId);
+                }
+
+                flash('success', 'Draft action slip finalized and released to selected staff.', 'success');
+                return;
+            }
+
+            if ($values['receiving_level'] === 'Department' && count($values['receiving_department_ids']) > 1) {
+                $firstDepartmentId = (int) array_shift($values['receiving_department_ids']);
+                $firstValues = $values;
+                $firstValues['receiving_department_id'] = $firstDepartmentId;
+                $firstValues['receiving_department_ids'] = [$firstDepartmentId];
+                $firstValues = array_merge($firstValues, $this->hiddenCreateValues($firstValues));
+
+                $this->slipModel->releaseDraft($slipId, $firstValues + [
+                    'actor_user_id' => $this->currentUserId(),
+                    'actor_department_id' => $this->currentDepartmentId()
+                ]);
+                $this->notificationModel->notifyDepartmentManagers([$firstDepartmentId], 'Action slip released', $slip['slip_number'] . ' was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+
+                foreach ($values['receiving_department_ids'] as $departmentId) {
+                    $duplicateValues = $values;
+                    $duplicateValues['receiving_department_id'] = (int) $departmentId;
+                    $duplicateValues['receiving_department_ids'] = [(int) $departmentId];
+                    $duplicateValues = array_merge($duplicateValues, $this->hiddenCreateValues($duplicateValues));
+                    $newSlipId = $this->slipModel->create($duplicateValues + [
+                        'attachment' => $slip['attachment'] ?? null,
+                        'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
+                        'actor_department_id' => $this->currentDepartmentId()
+                    ]);
+                    $this->notificationModel->notifyDepartmentManagers([(int) $departmentId], 'Action slip released', $slip['slip_number'] . ' was released to your department.', '/actionSlips/show/' . $newSlipId, $this->currentUserId());
+                }
+
+                flash('success', 'Draft action slip finalized and released to selected departments.', 'success');
+                return;
+            }
+
+            if ($values['receiving_level'] === 'Division' && count($values['receiving_division_ids']) > 1) {
+                $firstDivisionId = (int) array_shift($values['receiving_division_ids']);
+                $firstValues = $values;
+                $firstValues['receiving_division_id'] = $firstDivisionId;
+                $firstValues['receiving_division_ids'] = [$firstDivisionId];
+                $firstValues = array_merge($firstValues, $this->hiddenCreateValues($firstValues));
+
+                $this->slipModel->releaseDraft($slipId, $firstValues + [
+                    'actor_user_id' => $this->currentUserId(),
+                    'actor_department_id' => $this->currentDepartmentId()
+                ]);
+                $this->notificationModel->notifyDepartmentManagers([$firstDivisionId], 'Action slip released', $slip['slip_number'] . ' was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+
+                foreach ($values['receiving_division_ids'] as $divisionId) {
+                    $duplicateValues = $values;
+                    $duplicateValues['receiving_division_id'] = (int) $divisionId;
+                    $duplicateValues['receiving_division_ids'] = [(int) $divisionId];
+                    $duplicateValues = array_merge($duplicateValues, $this->hiddenCreateValues($duplicateValues));
+                    $newSlipId = $this->slipModel->create($duplicateValues + [
+                        'attachment' => $slip['attachment'] ?? null,
+                        'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
+                        'actor_department_id' => $this->currentDepartmentId()
+                    ]);
+                    $this->notificationModel->notifyDepartmentManagers([(int) $divisionId], 'Action slip released', $slip['slip_number'] . ' was released to your division.', '/actionSlips/show/' . $newSlipId, $this->currentUserId());
+                }
+
+                flash('success', 'Draft action slip finalized and released to selected divisions.', 'success');
+                return;
             }
 
             $values = array_merge($values, $this->hiddenCreateValues($values));

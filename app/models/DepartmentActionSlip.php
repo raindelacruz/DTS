@@ -192,7 +192,7 @@ class DepartmentActionSlip
     public function getNextSlipNumber($departmentId)
     {
         $departmentId = (int) $departmentId;
-        $code = $this->getDepartmentCode($departmentId);
+        $prefix = $this->getSlipNumberDepartmentPrefix($departmentId);
         $year = (int) date('Y');
         $month = (int) date('m');
 
@@ -211,7 +211,7 @@ class DepartmentActionSlip
         ]);
 
         $next = ((int) $stmt->fetchColumn()) + 1;
-        return sprintf('DAS-%s-%04d-%02d-%04d', $code ?: $departmentId, $year, $month, $next);
+        return sprintf('DAS-%s-%04d-%02d-%04d', $prefix ?: $departmentId, $year, $month, $next);
     }
 
     private function reserveSlipNumber($departmentId)
@@ -253,8 +253,8 @@ class DepartmentActionSlip
             ]);
         }
 
-        $code = $this->getDepartmentCode($departmentId);
-        return sprintf('DAS-%s-%04d-%02d-%04d', $code ?: $departmentId, $year, $month, $next);
+        $prefix = $this->getSlipNumberDepartmentPrefix($departmentId);
+        return sprintf('DAS-%s-%04d-%02d-%04d', $prefix ?: $departmentId, $year, $month, $next);
     }
 
     private function getDepartmentCode($departmentId)
@@ -262,6 +262,36 @@ class DepartmentActionSlip
         $stmt = $this->db->prepare("SELECT code FROM departments WHERE id = :id LIMIT 1");
         $stmt->execute(['id' => (int) $departmentId]);
         return (string) $stmt->fetchColumn();
+    }
+
+    private function getSlipNumberDepartmentPrefix($departmentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT child.code, parent.code AS parent_code
+            FROM departments child
+            LEFT JOIN departments parent ON parent.id = child.parent_id
+            WHERE child.id = :id
+            LIMIT 1
+        ");
+        $stmt->execute(['id' => (int) $departmentId]);
+        $department = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$department) {
+            return '';
+        }
+
+        $code = trim((string) ($department['code'] ?? ''));
+        $parentCode = trim((string) ($department['parent_code'] ?? ''));
+        if ($parentCode === '') {
+            return $code;
+        }
+
+        $divisionCode = $code;
+        $parentPrefix = $parentCode . '-';
+        if (stripos($divisionCode, $parentPrefix) === 0) {
+            $divisionCode = substr($divisionCode, strlen($parentPrefix));
+        }
+
+        return $divisionCode !== '' ? $parentCode . '-' . $divisionCode : $parentCode;
     }
 
     public function create($data)
