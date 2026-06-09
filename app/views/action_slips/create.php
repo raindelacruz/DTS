@@ -4,6 +4,7 @@
 $values = $data['values'] ?? [];
 $errors = $data['errors'] ?? [];
 $isParentDepartment = !empty($data['is_parent_department']);
+$isStaffDraft = !empty($data['is_staff_draft']);
 $selectedStaffIds = array_map('intval', (array) ($values['assigned_staff_ids'] ?? []));
 if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
     $selectedStaffIds = [(int) $values['assigned_staff_id']];
@@ -64,7 +65,7 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
 
 <div class="page-hero compact">
     <div>
-        <h1 class="section-title">New Action Slip</h1>
+        <h1 class="section-title"><?php echo $isStaffDraft ? 'Draft Action Slip' : 'New Action Slip'; ?></h1>
         <div class="text-muted small mt-1"><?php echo htmlspecialchars($data['next_slip_number'] ?? ''); ?></div>
     </div>
     <a href="<?php echo URLROOT; ?>/actionSlips" class="btn btn-outline-secondary">Back</a>
@@ -87,13 +88,16 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
             <input type="date" id="date_received" name="date_received" class="form-control <?php echo isset($errors['date_received']) ? 'is-invalid' : ''; ?>" value="<?php echo htmlspecialchars($values['date_received'] ?? date('Y-m-d')); ?>" required>
             <?php if (isset($errors['date_received'])): ?><div class="invalid-feedback"><?php echo htmlspecialchars($errors['date_received']); ?></div><?php endif; ?>
         </div>
+        <?php if (!$isStaffDraft): ?>
         <div class="col-lg-3 col-md-6 d-flex align-items-end">
             <div class="form-check mb-2">
                 <input type="checkbox" id="urgent" name="urgent" value="1" class="form-check-input" <?php echo !empty($values['urgent']) ? 'checked' : ''; ?>>
                 <label for="urgent" class="form-check-label fw-semibold">Urgent</label>
             </div>
         </div>
+        <?php endif; ?>
 
+        <?php if (!$isStaffDraft): ?>
         <div class="col-lg-4 col-md-6">
             <label for="deadline" class="form-label fw-semibold">Deadline</label>
             <input type="date" id="deadline" name="deadline" class="form-control <?php echo isset($errors['deadline']) ? 'is-invalid' : ''; ?>" value="<?php echo htmlspecialchars($values['deadline'] ?? ''); ?>">
@@ -109,10 +113,13 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
             </select>
             <?php if (isset($errors['required_action'])): ?><div class="invalid-feedback"><?php echo htmlspecialchars($errors['required_action']); ?></div><?php endif; ?>
         </div>
+        <?php endif; ?>
         <div class="col-lg-4">
             <label for="attachment" class="form-label fw-semibold">Attachment</label>
-            <input type="file" id="attachment" name="attachment" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx">
+            <input type="file" id="attachment" name="attachment" class="form-control <?php echo isset($errors['attachment']) ? 'is-invalid' : ''; ?>" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx" <?php echo $isStaffDraft ? 'required' : ''; ?>>
+            <?php if (isset($errors['attachment'])): ?><div class="invalid-feedback"><?php echo htmlspecialchars($errors['attachment']); ?></div><?php endif; ?>
         </div>
+        <?php if (!$isStaffDraft): ?>
         <div class="col-12">
             <label for="remarks" class="form-label fw-semibold">Instruction</label>
             <textarea id="remarks" name="remarks" rows="3" class="form-control"><?php echo htmlspecialchars($values['remarks'] ?? ''); ?></textarea>
@@ -179,14 +186,19 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
             </div>
             <div class="invalid-feedback <?php echo isset($errors['assigned_staff_id']) ? 'd-block' : ''; ?>" data-staff-error><?php echo htmlspecialchars($errors['assigned_staff_id'] ?? 'Select at least one staff member.'); ?></div>
         </div>
+        <?php else: ?>
+            <input type="hidden" name="receiving_level" value="Department">
+            <input type="hidden" name="required_action" value="">
+        <?php endif; ?>
 
         <div class="col-12 d-flex gap-2 justify-content-end pt-2">
             <a href="<?php echo URLROOT; ?>/actionSlips" class="btn btn-outline-secondary">Cancel</a>
-            <button type="submit" class="btn btn-primary">Create Action Slip</button>
+            <button type="submit" class="btn btn-primary"><?php echo $isStaffDraft ? 'Create Draft' : 'Create Action Slip'; ?></button>
         </div>
     </form>
 </div>
 
+<?php if (!$isStaffDraft): ?>
 <script>
 (() => {
     const level = document.getElementById('receiving_level');
@@ -270,5 +282,6 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
     refreshTargets();
 })();
 </script>
+<?php endif; ?>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

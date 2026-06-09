@@ -123,7 +123,7 @@ class ActionSlips extends Controller
 
     private function canCreate()
     {
-        return $this->isManager();
+        return $this->isManager() || ($_SESSION['role'] ?? '') === 'staff';
     }
 
     public function create()
@@ -145,7 +145,8 @@ class ActionSlips extends Controller
                 'division_staff' => $this->isParentDepartment() ? [] : $this->slipModel->getActiveStaffByDepartment($this->currentDepartmentId()),
                 'is_parent_department' => $this->isParentDepartment(),
                 'action_options' => DepartmentActionSlip::actionOptions(),
-                'next_slip_number' => $this->slipModel->getNextSlipNumber($departmentId)
+                'next_slip_number' => $this->slipModel->getNextSlipNumber($departmentId),
+                'is_staff_draft' => ($_SESSION['role'] ?? '') === 'staff'
             ];
 
             $this->view('action_slips/create', $data);
@@ -181,6 +182,11 @@ class ActionSlips extends Controller
 
             if (!$this->canCreate()) {
                 throw new AuthorizationException('Unauthorized action.');
+            }
+
+            if (($_SESSION['role'] ?? '') === 'staff') {
+                $this->storeDraft($values);
+                return;
             }
 
             $errors = $this->validateCreateValues($values);
@@ -235,6 +241,40 @@ class ActionSlips extends Controller
             storeFormState('action_slip_create', $values, [], 'We could not save the action slip right now. Please try again.');
             redirect('/actionSlips/create', 303);
         }
+    }
+
+    private function storeDraft($values)
+    {
+        $errors = $this->validateDraftValues($values);
+        if (!empty($errors)) {
+            throw new ValidationException('Please correct the highlighted fields.', $errors);
+        }
+
+        if (empty($_FILES['attachment']['name'])) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment is required.']);
+        }
+
+        $attachment = $this->handleUpload('attachment', 'action_slips');
+        $currentDepartment = $this->departmentModel->getDepartmentById($this->currentDepartmentId());
+        $receivingDepartmentId = (int) ($currentDepartment['parent_id'] ?? 0) > 0
+            ? (int) $currentDepartment['parent_id']
+            : $this->currentDepartmentId();
+        $receivingDivisionId = (int) ($currentDepartment['parent_id'] ?? 0) > 0
+            ? $this->currentDepartmentId()
+            : null;
+
+        $slipId = $this->slipModel->createDraft([
+            'date_received' => $values['date_received'],
+            'attachment' => $attachment,
+            'created_by' => $this->currentUserId(),
+            'actor_department_id' => $this->currentDepartmentId(),
+            'receiving_department_id' => $receivingDepartmentId,
+            'receiving_division_id' => $receivingDivisionId
+        ]);
+
+        $this->notificationModel->notifyDepartmentManagers([$receivingDepartmentId], 'Draft action slip created', 'A staff draft action slip is ready for review.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+        flash('success', 'Draft action slip created and sent to your department manager.', 'success');
+        redirect('/actionSlips/show/' . $slipId, 303);
     }
 
     private function postedStaffIds()
@@ -308,6 +348,15 @@ class ActionSlips extends Controller
         return $errors;
     }
 
+    private function validateDraftValues($values)
+    {
+        $errors = [];
+        if ($values['date_received'] === '') {
+            $errors['date_received'] = 'Date of Action Slip is required.';
+        }
+        return $errors;
+    }
+
     private function hiddenCreateValues($values)
     {
         $currentDepartment = $this->departmentModel->getDepartmentById($this->currentDepartmentId());
@@ -358,7 +407,8 @@ class ActionSlips extends Controller
                 'departments' => $this->departmentModel->getParentDepartments(),
                 'child_divisions' => $this->departmentModel->getChildDepartmentsForParent($currentDepartmentId),
                 'division_staff' => $currentDivisionId > 0 ? $this->slipModel->getActiveStaffByDepartment($currentDivisionId) : [],
-                'actions' => $this->allowedActions($slip)
+                'actions' => $this->allowedActions($slip),
+                'action_options' => DepartmentActionSlip::actionOptions()
             ];
 
             $this->view('action_slips/view', $data);
@@ -385,6 +435,7 @@ class ActionSlips extends Controller
         $isDepartmentManager = $this->isManager() && $this->isParentDepartment($deptId) && $currentDepartmentId === $deptId;
         $isDivisionManager = $this->isManager() && !$this->isParentDepartment($deptId) && $currentDivisionId === $deptId;
         $isAssignedStaff = $assignedStaffId === $this->currentUserId();
+        $isCreatorStaff = ($_SESSION['role'] ?? '') === 'staff' && (int) ($slip['created_by'] ?? 0) === $this->currentUserId();
         $wasCompletedByStaff = $status === DepartmentActionSlip::STATUS_COMPLETED
             && $assignedStaffId > 0
             && (int) ($slip['completed_by'] ?? 0) === $assignedStaffId;
@@ -392,6 +443,7 @@ class ActionSlips extends Controller
 
         return [
             'receive_department' => $isDepartmentManager && $currentDivisionId === 0 && $status === DepartmentActionSlip::STATUS_RELEASED,
+            'finalize_draft' => $isDepartmentManager && $status === DepartmentActionSlip::STATUS_DRAFT,
             'route_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'delegate_division' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'complete_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RETURNED], true),
@@ -401,10 +453,59 @@ class ActionSlips extends Controller
             'complete_division' => $isDivisionManager && $assignedStaffId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'confirm_division' => $isDivisionManager && $wasCompletedByStaff,
             'return_staff_completion' => $isDivisionManager && $wasCompletedByStaff,
-            'start_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
+            'start_staff' => $isAssignedStaff && !$isCreatorStaff && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
             'complete_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'return' => $isDivisionManager && $wasCompletedByStaff
         ];
+    }
+
+    public function finalizeDraft($id)
+    {
+        $this->handleAction($id, function ($slipId, $slip) {
+            if (!$this->allowedActions($slip)['finalize_draft']) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $values = [
+                'date_received' => trim($_POST['date_received'] ?? ($slip['date_received'] ?? '')),
+                'urgent' => !empty($_POST['urgent']) ? 1 : 0,
+                'receiving_level' => trim($_POST['receiving_level'] ?? 'Department'),
+                'receiving_department_id' => (int) ($_POST['receiving_department_id'] ?? 0),
+                'receiving_division_id' => (int) ($_POST['receiving_division_id'] ?? 0),
+                'assigned_staff_id' => (int) ($_POST['assigned_staff_id'] ?? 0),
+                'assigned_staff_ids' => $this->postedStaffIds(),
+                'required_action' => trim($_POST['required_action'] ?? ''),
+                'deadline' => trim($_POST['deadline'] ?? ''),
+                'remarks' => trim($_POST['remarks'] ?? '')
+            ];
+            if (empty($values['assigned_staff_ids']) && $values['assigned_staff_id'] > 0) {
+                $values['assigned_staff_ids'] = [$values['assigned_staff_id']];
+            }
+            $values['assigned_staff_id'] = (int) ($values['assigned_staff_ids'][0] ?? 0);
+
+            $errors = $this->validateCreateValues($values);
+            if (!empty($errors)) {
+                throw new ValidationException(reset($errors));
+            }
+
+            $values = array_merge($values, $this->hiddenCreateValues($values));
+            $this->slipModel->releaseDraft($slipId, $values + [
+                'actor_user_id' => $this->currentUserId(),
+                'actor_department_id' => $this->currentDepartmentId()
+            ]);
+
+            if ($values['receiving_level'] === 'Staff') {
+                foreach ($values['assigned_staff_ids'] as $staffId) {
+                    $this->notificationModel->create((int) $staffId, 'Action slip released', $slip['slip_number'] . ' was released to you.', '/actionSlips/show/' . $slipId);
+                }
+            } elseif ($values['receiving_level'] === 'Division') {
+                $this->notificationModel->notifyDepartmentManagers([$values['receiving_division_id']], 'Action slip released', $slip['slip_number'] . ' was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+            } else {
+                $this->notificationModel->notifyDepartmentManagers([$values['receiving_department_id']], 'Action slip released', $slip['slip_number'] . ' was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+            }
+
+            flash('success', 'Draft action slip finalized and released.', 'success');
+        });
     }
 
     public function receiveDepartment($id)

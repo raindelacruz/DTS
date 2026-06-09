@@ -372,6 +372,99 @@ class DepartmentActionSlip
         }
     }
 
+    public function createDraft($data)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $actorDepartmentId = (int) $data['actor_department_id'];
+            $receivingDepartmentId = (int) ($data['receiving_department_id'] ?? $actorDepartmentId);
+            $receivingDivisionId = !empty($data['receiving_division_id']) ? (int) $data['receiving_division_id'] : null;
+            $slipNumber = $this->reserveSlipNumber($actorDepartmentId);
+
+            $stmt = $this->db->prepare("
+                INSERT INTO department_action_slips (
+                    slip_number,
+                    external_source,
+                    date_received,
+                    subject,
+                    reference_number,
+                    receiving_level,
+                    urgent,
+                    attachment,
+                    required_action,
+                    deadline,
+                    receiving_department_id,
+                    receiving_division_id,
+                    current_department_id,
+                    current_division_id,
+                    assigned_staff_id,
+                    remarks,
+                    created_by,
+                    status
+                ) VALUES (
+                    :slip_number,
+                    :external_source,
+                    :date_received,
+                    :subject,
+                    :reference_number,
+                    :receiving_level,
+                    :urgent,
+                    :attachment,
+                    :required_action,
+                    :deadline,
+                    :receiving_department_id,
+                    :receiving_division_id,
+                    :current_department_id,
+                    :current_division_id,
+                    :assigned_staff_id,
+                    :remarks,
+                    :created_by,
+                    :status
+                )
+            ");
+
+            $stmt->execute([
+                'slip_number' => $slipNumber,
+                'external_source' => 'Staff Draft',
+                'date_received' => $data['date_received'],
+                'subject' => 'Draft action slip',
+                'reference_number' => null,
+                'receiving_level' => 'Department',
+                'urgent' => 0,
+                'attachment' => $data['attachment'] ?: null,
+                'required_action' => 'Pending manager action',
+                'deadline' => null,
+                'receiving_department_id' => $receivingDepartmentId,
+                'receiving_division_id' => $receivingDivisionId,
+                'current_department_id' => $receivingDepartmentId,
+                'current_division_id' => $receivingDivisionId,
+                'assigned_staff_id' => null,
+                'remarks' => null,
+                'created_by' => (int) $data['created_by'],
+                'status' => self::STATUS_DRAFT
+            ]);
+
+            $slipId = (int) $this->db->lastInsertId();
+            $this->logEvent($slipId, [
+                'action' => 'Draft Created',
+                'actor_user_id' => (int) $data['created_by'],
+                'actor_department_id' => $actorDepartmentId,
+                'to_department_id' => $receivingDivisionId ?: $receivingDepartmentId,
+                'new_status' => self::STATUS_DRAFT,
+                'remarks' => 'Draft action slip created by staff.'
+            ]);
+
+            $this->db->commit();
+            return $slipId;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     public function getVisible($userId, $departmentId, $role, $filters = [])
     {
         $params = [
@@ -660,6 +753,48 @@ class DepartmentActionSlip
     public function receiveByDepartment($slipId, $actorUserId, $actorDepartmentId, $remarks = '')
     {
         $this->transition($slipId, self::STATUS_RECEIVED, 'Received by Department', $actorUserId, $actorDepartmentId, $remarks);
+    }
+
+    public function releaseDraft($slipId, $data)
+    {
+        $slip = $this->requireSlip($slipId);
+        $receivingDepartmentId = (int) $data['receiving_department_id'];
+        $receivingDivisionId = !empty($data['receiving_division_id']) ? (int) $data['receiving_division_id'] : null;
+        $currentDivisionId = in_array($data['receiving_level'], ['Division', 'Staff'], true) ? $receivingDivisionId : null;
+        $assignedStaffId = !empty($data['assigned_staff_id']) ? (int) $data['assigned_staff_id'] : null;
+        $releaseAction = $data['release_action'] ?? 'Released';
+
+        $this->updateSlipAndLog($slipId, [
+            'external_source' => $data['external_source'] ?? 'Internal Action Slip',
+            'subject' => $data['subject'] ?? $data['required_action'],
+            'reference_number' => $data['reference_number'] ?: null,
+            'date_received' => $data['date_received'],
+            'receiving_level' => $data['receiving_level'],
+            'urgent' => !empty($data['urgent']) ? 1 : 0,
+            'required_action' => $data['required_action'],
+            'deadline' => $data['deadline'] ?: null,
+            'receiving_department_id' => $receivingDepartmentId,
+            'receiving_division_id' => $receivingDivisionId,
+            'current_department_id' => $receivingDepartmentId,
+            'current_division_id' => $currentDivisionId,
+            'assigned_staff_id' => $assignedStaffId,
+            'remarks' => $data['remarks'] ?: null,
+            'status' => self::STATUS_RELEASED,
+            'completed_at' => null,
+            'completed_by' => null,
+            'closed_at' => null,
+            'closed_by' => null
+        ], [
+            'action' => $releaseAction,
+            'actor_user_id' => (int) $data['actor_user_id'],
+            'actor_department_id' => (int) $data['actor_department_id'],
+            'from_department_id' => (int) $data['actor_department_id'],
+            'to_department_id' => $currentDivisionId ?: $receivingDepartmentId,
+            'to_user_id' => $assignedStaffId,
+            'old_status' => $slip['status'],
+            'new_status' => self::STATUS_RELEASED,
+            'remarks' => $data['remarks'] ?: null
+        ]);
     }
 
     public function routeToDepartment($slipId, $targetDepartmentId, $actorUserId, $actorDepartmentId, $remarks = '', $status = self::STATUS_RELEASED, $action = 'Released to Department')

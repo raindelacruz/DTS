@@ -65,6 +65,55 @@ $statusStyle = [
                     </form>
                 <?php endif; ?>
 
+                <?php if (!empty($actions['finalize_draft'])): ?>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/finalizeDraft/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-draft-finalize-form>
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-2">Finalize Draft</div>
+                        <label for="draft_date_received" class="form-label small fw-semibold">Date of Action Slip</label>
+                        <input type="date" id="draft_date_received" name="date_received" class="form-control mb-2" value="<?php echo htmlspecialchars($slip['date_received'] ?? ''); ?>" required>
+                        <div class="form-check mb-2">
+                            <input type="checkbox" id="draft_urgent" name="urgent" value="1" class="form-check-input" <?php echo !empty($slip['urgent']) ? 'checked' : ''; ?>>
+                            <label for="draft_urgent" class="form-check-label fw-semibold">Urgent</label>
+                        </div>
+                        <label for="draft_required_action" class="form-label small fw-semibold">Action</label>
+                        <select id="draft_required_action" name="required_action" class="form-select mb-2" required>
+                            <option value="">Select action</option>
+                            <?php foreach (($data['action_options'] ?? []) as $option): ?>
+                                <option value="<?php echo htmlspecialchars($option); ?>" <?php echo (($slip['required_action'] ?? '') === $option) ? 'selected' : ''; ?>><?php echo htmlspecialchars($option); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <label for="draft_deadline" class="form-label small fw-semibold">Deadline</label>
+                        <input type="date" id="draft_deadline" name="deadline" class="form-control mb-2" value="<?php echo htmlspecialchars($slip['deadline'] ?? ''); ?>">
+                        <label for="draft_receiving_level" class="form-label small fw-semibold">Forward To</label>
+                        <select id="draft_receiving_level" name="receiving_level" class="form-select mb-2" data-draft-level>
+                            <option value="Department">Department</option>
+                            <option value="Division">Division</option>
+                        </select>
+                        <div data-draft-department-wrap>
+                            <label for="draft_receiving_department_id" class="form-label small fw-semibold">Target Department</label>
+                            <select id="draft_receiving_department_id" name="receiving_department_id" class="form-select mb-2">
+                                <option value="">Select department</option>
+                                <?php foreach (($data['departments'] ?? []) as $department): ?>
+                                    <?php if ((int) $department['id'] === (int) ($_SESSION['department_id'] ?? 0)) { continue; } ?>
+                                    <option value="<?php echo (int) $department['id']; ?>"><?php echo htmlspecialchars($department['division_name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div data-draft-division-wrap>
+                            <label for="draft_receiving_division_id" class="form-label small fw-semibold">Target Division</label>
+                            <select id="draft_receiving_division_id" name="receiving_division_id" class="form-select mb-2">
+                                <option value="">Select division</option>
+                                <?php foreach (($data['child_divisions'] ?? []) as $division): ?>
+                                    <option value="<?php echo (int) $division['id']; ?>"><?php echo htmlspecialchars($division['division_name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <label for="draft_remarks" class="form-label small fw-semibold">Instruction</label>
+                        <textarea id="draft_remarks" name="remarks" class="form-control mb-2" rows="3" placeholder="Instructions or remarks"><?php echo htmlspecialchars($slip['remarks'] ?? ''); ?></textarea>
+                        <button type="submit" class="btn btn-primary w-100">Create and Forward</button>
+                    </form>
+                <?php endif; ?>
+
                 <?php if (!empty($actions['route_department'])): ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/routeDepartment/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;">
                         <?php echo csrfInput(); ?>
@@ -221,5 +270,31 @@ $statusStyle = [
         <div class="text-muted">No action history recorded.</div>
     <?php endif; ?>
 </div>
+
+<script>
+(() => {
+    const form = document.querySelector('[data-draft-finalize-form]');
+    if (!form) {
+        return;
+    }
+
+    const level = form.querySelector('[data-draft-level]');
+    const departmentWrap = form.querySelector('[data-draft-department-wrap]');
+    const divisionWrap = form.querySelector('[data-draft-division-wrap]');
+    const department = document.getElementById('draft_receiving_department_id');
+    const division = document.getElementById('draft_receiving_division_id');
+
+    function refreshDraftTargets() {
+        const target = level.value;
+        departmentWrap.style.display = target === 'Department' ? '' : 'none';
+        divisionWrap.style.display = target === 'Division' ? '' : 'none';
+        department.required = target === 'Department';
+        division.required = target === 'Division';
+    }
+
+    level.addEventListener('change', refreshDraftTargets);
+    refreshDraftTargets();
+})();
+</script>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

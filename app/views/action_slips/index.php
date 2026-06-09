@@ -28,7 +28,7 @@ $statusClasses = [
         <div class="text-muted small mt-1">Direct action slips across departments, divisions, and staff.</div>
     </div>
     <?php if (!empty($data['can_create'])): ?>
-        <a href="<?php echo URLROOT; ?>/actionSlips/create" class="btn btn-primary">New Action Slip</a>
+        <a href="<?php echo URLROOT; ?>/actionSlips/create" class="btn btn-primary"><?php echo (($_SESSION['role'] ?? '') === 'staff') ? 'Draft Action Slip' : 'New Action Slip'; ?></a>
     <?php endif; ?>
 </div>
 
