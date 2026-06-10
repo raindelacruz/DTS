@@ -269,16 +269,48 @@ $statusStyle = [
                 <?php endif; ?>
 
                 <?php if (!empty($actions['delegate_staff'])): ?>
-                    <form action="<?php echo URLROOT; ?>/actionSlips/delegateStaff/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;">
+                    <form action="<?php echo URLROOT; ?>/actionSlips/delegateStaff/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-staff-delegate-form>
                         <?php echo csrfInput(); ?>
                         <div class="fw-bold mb-2">Further Delegate to Staff</div>
-                        <select name="staff_id" class="form-select mb-2" required>
-                            <option value="">Select staff</option>
-                            <?php foreach (($data['division_staff'] ?? []) as $staff): ?>
-                                <?php $staffName = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? '')); ?>
-                                <option value="<?php echo (int) $staff['id']; ?>"><?php echo htmlspecialchars($staffName); ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                        <label id="delegate_staff_label" class="visually-hidden">Select staff</label>
+                        <div class="route-multiselect mb-2" data-delegate-staff-multiselect data-route-required>
+                            <button
+                                type="button"
+                                class="form-select route-multiselect-toggle text-start"
+                                aria-labelledby="delegate_staff_label"
+                                aria-expanded="false"
+                                data-route-multiselect-toggle
+                            >
+                                <span data-route-multiselect-summary>Select staff</span>
+                            </button>
+                            <div class="route-multiselect-menu d-none" data-route-multiselect-menu>
+                                <input
+                                    type="search"
+                                    class="form-control route-search-input mb-2"
+                                    placeholder="Search staff"
+                                    aria-label="Search staff"
+                                    data-route-multiselect-search
+                                >
+                                <div class="route-checkbox-group route-multiselect-options" role="group" aria-labelledby="delegate_staff_label">
+                                    <?php foreach (($data['division_staff'] ?? []) as $staff): ?>
+                                        <?php $staffId = (int) $staff['id']; ?>
+                                        <?php $staffName = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? '')); ?>
+                                        <label class="route-checkbox-item" for="delegate_staff_<?php echo $staffId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($staffName), ENT_QUOTES, 'UTF-8'); ?>">
+                                            <input
+                                                class="form-check-input"
+                                                type="checkbox"
+                                                id="delegate_staff_<?php echo $staffId; ?>"
+                                                name="staff_ids[]"
+                                                value="<?php echo $staffId; ?>"
+                                            >
+                                            <span><?php echo htmlspecialchars($staffName); ?></span>
+                                        </label>
+                                    <?php endforeach; ?>
+                                    <div class="route-empty-state d-none" data-route-empty>No staff match your search.</div>
+                                </div>
+                            </div>
+                            <div class="invalid-feedback" data-route-required-error>Select at least one staff member.</div>
+                        </div>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Instructions or remarks"></textarea>
                         <button type="submit" class="btn btn-outline-dark w-100">Further Delegate to Staff</button>
                     </form>
@@ -395,7 +427,14 @@ $statusStyle = [
         position: relative;
         z-index: 30;
     }
+    [data-staff-delegate-form] {
+        position: relative;
+        z-index: 30;
+    }
     [data-draft-finalize-form]:has(.route-multiselect-menu:not(.d-none)) {
+        z-index: 1400;
+    }
+    [data-staff-delegate-form]:has(.route-multiselect-menu:not(.d-none)) {
         z-index: 1400;
     }
     .route-multiselect-toggle {
@@ -421,6 +460,7 @@ $statusStyle = [
     .route-multiselect-options {
         max-height: 13rem;
         padding: 0.45rem;
+        overflow-y: auto;
     }
     .action-slip-main-row,
     .action-slip-actions-col,
@@ -436,31 +476,10 @@ $statusStyle = [
 
 <script>
 (() => {
-    const form = document.querySelector('[data-draft-finalize-form]');
-    if (!form) {
-        return;
-    }
+    const pickers = [];
 
-    const level = form.querySelector('[data-draft-level]');
-    const departmentWrap = form.querySelector('[data-draft-department-wrap]');
-    const divisionWrap = form.querySelector('[data-draft-division-wrap]');
-    const staffWrap = form.querySelector('[data-draft-staff-wrap]');
-    const departmentPicker = createRouteMultiselect(
-        form.querySelector('[data-draft-department-multiselect]'),
-        'Select department',
-        'departments selected'
-    );
-    const divisionPicker = createRouteMultiselect(
-        form.querySelector('[data-draft-division-multiselect]'),
-        'Select division',
-        'divisions selected'
-    );
-    const staffPicker = createRouteMultiselect(
-        form.querySelector('[data-draft-staff-multiselect]'),
-        'Select staff',
-        'staff selected'
-    );
-    const routePickers = [departmentPicker, divisionPicker, staffPicker].filter(Boolean);
+    const draftForm = document.querySelector('[data-draft-finalize-form]');
+    const delegateStaffForm = document.querySelector('[data-staff-delegate-form]');
 
     function createRouteMultiselect(container, emptySummary, pluralSummary) {
         if (!container) {
@@ -474,6 +493,7 @@ $statusStyle = [
         const checks = Array.prototype.slice.call(container.querySelectorAll('input[type="checkbox"]'));
         const items = Array.prototype.slice.call(container.querySelectorAll('.route-checkbox-item'));
         const empty = container.querySelector('[data-route-empty]');
+        const error = container.querySelector('[data-route-required-error]');
 
         const selectedLabels = () => checks
             .filter((checkbox) => checkbox.checked)
@@ -543,13 +563,19 @@ $statusStyle = [
             search.addEventListener('input', filterOptions);
         }
         checks.forEach((checkbox) => {
-            checkbox.addEventListener('change', updateSummary);
+            checkbox.addEventListener('change', () => {
+                updateSummary();
+                container.classList.remove('is-invalid');
+                if (error) {
+                    error.classList.remove('d-block');
+                }
+            });
         });
 
         updateSummary();
         filterOptions();
 
-        return {
+        const picker = {
             container,
             checks,
             setOpen,
@@ -560,30 +586,86 @@ $statusStyle = [
                 if (isDisabled) {
                     setOpen(false);
                 }
+            },
+            isValid() {
+                return checks.some((checkbox) => checkbox.checked);
+            },
+            showRequiredError() {
+                container.classList.add('is-invalid');
+                if (error) {
+                    error.classList.add('d-block');
+                }
+                setOpen(true);
+                if (search) {
+                    search.focus();
+                }
             }
         };
+
+        pickers.push(picker);
+        return picker;
     }
 
-    function refreshDraftTargets() {
-        const target = level.value;
-        departmentWrap.style.display = target === 'Department' ? '' : 'none';
-        divisionWrap.style.display = target === 'Division' ? '' : 'none';
-        if (staffWrap) {
-            staffWrap.style.display = target === 'Staff' ? '' : 'none';
+    if (draftForm) {
+        const level = draftForm.querySelector('[data-draft-level]');
+        const departmentWrap = draftForm.querySelector('[data-draft-department-wrap]');
+        const divisionWrap = draftForm.querySelector('[data-draft-division-wrap]');
+        const staffWrap = draftForm.querySelector('[data-draft-staff-wrap]');
+        const departmentPicker = createRouteMultiselect(
+            draftForm.querySelector('[data-draft-department-multiselect]'),
+            'Select department',
+            'departments selected'
+        );
+        const divisionPicker = createRouteMultiselect(
+            draftForm.querySelector('[data-draft-division-multiselect]'),
+            'Select division',
+            'divisions selected'
+        );
+        const staffPicker = createRouteMultiselect(
+            draftForm.querySelector('[data-draft-staff-multiselect]'),
+            'Select staff',
+            'staff selected'
+        );
+
+        function refreshDraftTargets() {
+            const target = level.value;
+            departmentWrap.style.display = target === 'Department' ? '' : 'none';
+            divisionWrap.style.display = target === 'Division' ? '' : 'none';
+            if (staffWrap) {
+                staffWrap.style.display = target === 'Staff' ? '' : 'none';
+            }
+            if (departmentPicker) {
+                departmentPicker.setDisabled(target !== 'Department');
+            }
+            if (divisionPicker) {
+                divisionPicker.setDisabled(target !== 'Division');
+            }
+            if (staffPicker) {
+                staffPicker.setDisabled(target !== 'Staff');
+            }
         }
-        if (departmentPicker) {
-            departmentPicker.setDisabled(target !== 'Department');
-        }
-        if (divisionPicker) {
-            divisionPicker.setDisabled(target !== 'Division');
-        }
-        if (staffPicker) {
-            staffPicker.setDisabled(target !== 'Staff');
-        }
+
+        level.addEventListener('change', refreshDraftTargets);
+        refreshDraftTargets();
+    }
+
+    if (delegateStaffForm) {
+        const delegateStaffPicker = createRouteMultiselect(
+            delegateStaffForm.querySelector('[data-delegate-staff-multiselect]'),
+            'Select staff',
+            'staff selected'
+        );
+
+        delegateStaffForm.addEventListener('submit', (event) => {
+            if (delegateStaffPicker && !delegateStaffPicker.isValid()) {
+                event.preventDefault();
+                delegateStaffPicker.showRequiredError();
+            }
+        });
     }
 
     document.addEventListener('click', (event) => {
-        routePickers.forEach((picker) => {
+        pickers.forEach((picker) => {
             if (!picker.container.contains(event.target)) {
                 picker.setOpen(false);
             }
@@ -591,12 +673,9 @@ $statusStyle = [
     });
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-            routePickers.forEach((picker) => picker.setOpen(false));
+            pickers.forEach((picker) => picker.setOpen(false));
         }
     });
-
-    level.addEventListener('change', refreshDraftTargets);
-    refreshDraftTargets();
 })();
 </script>
 

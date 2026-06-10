@@ -315,6 +315,22 @@ class ActionSlips extends Controller
         })));
     }
 
+    private function postedDelegateStaffIds()
+    {
+        $staffIds = $_POST['staff_ids'] ?? ($_POST['assigned_staff_ids'] ?? []);
+        if (!is_array($staffIds)) {
+            $staffIds = [$staffIds];
+        }
+
+        if (empty($staffIds) && !empty($_POST['staff_id'])) {
+            $staffIds = [$_POST['staff_id']];
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', $staffIds), function ($staffId) {
+            return $staffId > 0;
+        })));
+    }
+
     private function postedDepartmentIds()
     {
         $departmentIds = $_POST['receiving_department_ids'] ?? [];
@@ -749,14 +765,47 @@ class ActionSlips extends Controller
                 throw new AuthorizationException('Unauthorized action.');
             }
 
-            $staffId = (int) ($_POST['staff_id'] ?? 0);
-            if (!$this->slipModel->findActiveUserInDepartment($staffId, $this->currentDepartmentId(), 'staff')) {
-                throw new ValidationException('Select an active staff member from the current division.');
+            $staffIds = $this->postedDelegateStaffIds();
+            if (empty($staffIds)) {
+                throw new ValidationException('Select at least one active staff member from the current division.');
             }
 
-            $this->slipModel->delegateToStaff($slipId, $staffId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
-            $this->notificationModel->create($staffId, 'Action slip assigned', $slip['slip_number'] . ' was assigned to you.', '/actionSlips/show/' . $slipId);
-            flash('success', 'Action slip delegated to staff.', 'success');
+            foreach ($staffIds as $staffId) {
+                if (!$this->slipModel->findActiveUserInDepartment($staffId, $this->currentDepartmentId(), 'staff')) {
+                    throw new ValidationException('Select active staff members from the current division.');
+                }
+            }
+
+            $remarks = trim($_POST['remarks'] ?? '');
+            $firstStaffId = (int) array_shift($staffIds);
+            $this->slipModel->delegateToStaff($slipId, $firstStaffId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
+            $this->notificationModel->create($firstStaffId, 'Action slip assigned', $slip['slip_number'] . ' was assigned to you.', '/actionSlips/show/' . $slipId);
+
+            foreach ($staffIds as $staffId) {
+                $duplicateSlipId = $this->slipModel->create([
+                    'external_source' => $slip['external_source'] ?? 'Internal Action Slip',
+                    'date_received' => $slip['date_received'],
+                    'subject' => $slip['subject'] ?? ($slip['required_action'] ?? 'Action slip'),
+                    'reference_number' => $slip['reference_number'] ?? null,
+                    'receiving_level' => 'Staff',
+                    'urgent' => !empty($slip['urgent']) ? 1 : 0,
+                    'attachment' => $slip['attachment'] ?? null,
+                    'required_action' => $slip['required_action'],
+                    'deadline' => $slip['deadline'] ?? null,
+                    'receiving_department_id' => (int) ($slip['current_department_id'] ?: $slip['receiving_department_id']),
+                    'receiving_division_id' => $this->currentDepartmentId(),
+                    'assigned_staff_id' => (int) $staffId,
+                    'remarks' => $remarks,
+                    'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
+                    'actor_department_id' => $this->currentDepartmentId(),
+                    'release_action' => 'Released to Staff'
+                ]);
+
+                $this->slipModel->delegateToStaff($duplicateSlipId, (int) $staffId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
+                $this->notificationModel->create((int) $staffId, 'Action slip assigned', 'A new action slip was assigned to you.', '/actionSlips/show/' . $duplicateSlipId);
+            }
+
+            flash('success', 'Action slip delegated to selected staff.', 'success');
         });
     }
 
