@@ -11,7 +11,7 @@
     <p>Start here to monitor document volume, pending work, and department activity. Use the action buttons below to open the full document list or create a new routing entry.</p>
 </div>
 
-<div class="row g-4 mb-4">
+<div class="row g-4 mb-4 dashboard-stat-row">
     <div class="col-md-6 col-xl-3">
         <div class="app-card h-100 p-4" style="background:linear-gradient(135deg, #dcfce7 0%, #ecfdf5 100%);">
             <div class="text-uppercase small text-muted fw-semibold">Total Documents</div>

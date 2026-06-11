@@ -20,7 +20,7 @@ $filters = $data['filters'] ?? [];
     <p>This screen shows documents routed into your department. Filter the list when needed, then open a record to receive it or complete the next manager action shown on the details page.</p>
 </div>
 
-<div class="app-card p-4 mb-4">
+<div class="app-card list-filter-card p-4 mb-4">
     <form method="GET" class="row g-3 align-items-end">
         <div class="col-lg-3 col-md-6">
             <label class="form-label fw-semibold">Keyword</label>
@@ -61,7 +61,7 @@ $filters = $data['filters'] ?? [];
     </form>
 </div>
 
-<div class="app-card p-4">
+<div class="app-card records-table-card p-4">
     <div class="table-responsive">
         <table class="table table-modern align-middle mb-0">
             <thead>

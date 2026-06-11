@@ -87,6 +87,102 @@
         }
         .auth-link { margin-top: 18px; text-align: center; color: #64748b; font-size: 0.94rem; }
         .auth-link a { color: #0f766e; font-weight: 700; text-decoration: none; }
+
+        @media (max-width: 575.98px) {
+            body {
+                display: block;
+                min-height: 100dvh;
+                padding: 18px 12px;
+                background:
+                    radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 30%),
+                    radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.10), transparent 28%),
+                    linear-gradient(180deg, #f8fbfd 0%, #e8f1f6 100%);
+            }
+            .auth-card {
+                max-width: none;
+                min-height: calc(100dvh - 36px);
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                padding: 22px;
+                border-radius: 22px;
+                box-shadow: 0 18px 42px rgba(15, 23, 42, 0.10);
+            }
+            .auth-brand {
+                justify-content: flex-start;
+                gap: 10px;
+                margin-bottom: 18px;
+            }
+            .auth-brand img {
+                width: 72px;
+                height: 72px;
+            }
+            .auth-brand h1 {
+                font-size: 1.42rem;
+                line-height: 1.12;
+            }
+            .auth-help {
+                padding: 11px 13px;
+                margin-bottom: 16px;
+                border-radius: 14px;
+                font-size: 0.86rem;
+                line-height: 1.45;
+            }
+            .alert {
+                padding: 10px 12px;
+                margin-bottom: 12px;
+                border-radius: 12px;
+                font-size: 0.86rem;
+            }
+            .field {
+                margin-bottom: 12px;
+            }
+            .field label {
+                margin-bottom: 6px;
+                font-size: 0.86rem;
+            }
+            .field input {
+                min-height: 48px;
+                padding: 12px 14px;
+                border-radius: 14px;
+                font-size: 1rem;
+                background: rgba(255, 255, 255, 0.98);
+            }
+            .password-field input {
+                padding-right: 48px;
+            }
+            .password-toggle {
+                right: 8px;
+                width: 38px;
+                height: 38px;
+            }
+            .btn-primary {
+                min-height: 48px;
+                padding: 12px 16px;
+                border-radius: 14px;
+            }
+            .auth-link {
+                margin-top: 16px;
+            }
+        }
+
+        @media (max-width: 360px) {
+            body { padding: 10px; }
+            .auth-card {
+                min-height: calc(100dvh - 20px);
+                padding: 18px;
+            }
+            .auth-brand img {
+                width: 62px;
+                height: 62px;
+            }
+            .auth-brand h1 {
+                font-size: 1.24rem;
+            }
+            .auth-help {
+                font-size: 0.82rem;
+            }
+        }
     </style>
 </head>
 <body>

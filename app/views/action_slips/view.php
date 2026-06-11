@@ -30,23 +30,23 @@ $statusStyle = [
 
 <div class="row g-4 mb-4 action-slip-main-row">
     <div class="col-lg-8">
-        <div class="app-card p-4 h-100">
-            <div class="d-flex justify-content-between align-items-start gap-3 mb-4">
+        <div class="app-card p-4 h-100 action-slip-info-card">
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-4 action-slip-info-head">
                 <div>
                     <div class="text-muted small text-uppercase fw-semibold">Action</div>
                     <div class="fs-4 fw-bold"><?php echo htmlspecialchars($slip['required_action'] ?? ''); ?></div>
                 </div>
                 <span class="badge-soft" style="<?php echo $statusStyle[$slip['status'] ?? ''] ?? 'background:#f1f5f9; color:#0f172a;'; ?>"><?php echo htmlspecialchars($slip['status'] ?? ''); ?></span>
             </div>
-            <div class="row g-3">
-                <div class="col-md-3"><div class="app-card p-3 h-100" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Tracking Number</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($slip['slip_number'] ?? ''); ?></div></div></div>
-                <div class="col-md-3"><div class="app-card p-3 h-100" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Date of Action Slip</div><div class="fw-bold mt-2"><?php echo !empty($slip['date_received']) ? htmlspecialchars(date('M d, Y', strtotime($slip['date_received']))) : '-'; ?></div></div></div>
-                <div class="col-md-3"><div class="app-card p-3 h-100" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Deadline</div><div class="fw-bold mt-2"><?php echo !empty($slip['deadline']) ? htmlspecialchars(date('M d, Y', strtotime($slip['deadline']))) : '-'; ?></div></div></div>
-                <div class="col-md-3"><div class="app-card p-3 h-100" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Urgent</div><div class="fw-bold mt-2"><?php echo !empty($slip['urgent']) ? 'Yes' : 'No'; ?></div></div></div>
-                <div class="col-md-6"><div class="app-card p-3 h-100" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Released To</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-')); ?><?php echo !empty($slip['assigned_staff_name']) ? '<div class="small text-muted mt-1">' . htmlspecialchars($slip['assigned_staff_name']) . '</div>' : ''; ?></div></div></div>
+            <div class="row g-3 action-slip-detail-grid">
+                <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Tracking Number</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($slip['slip_number'] ?? ''); ?></div></div></div>
+                <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Date of Action Slip</div><div class="fw-bold mt-2"><?php echo !empty($slip['date_received']) ? htmlspecialchars(date('M d, Y', strtotime($slip['date_received']))) : '-'; ?></div></div></div>
+                <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Deadline</div><div class="fw-bold mt-2"><?php echo !empty($slip['deadline']) ? htmlspecialchars(date('M d, Y', strtotime($slip['deadline']))) : '-'; ?></div></div></div>
+                <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Urgent</div><div class="fw-bold mt-2"><?php echo !empty($slip['urgent']) ? 'Yes' : 'No'; ?></div></div></div>
+                <div class="col-md-6 action-slip-detail-item action-slip-detail-wide"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Released To</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-')); ?><?php echo !empty($slip['assigned_staff_name']) ? '<div class="small text-muted mt-1">' . htmlspecialchars($slip['assigned_staff_name']) . '</div>' : ''; ?></div></div></div>
                 <?php if (!empty($slip['remarks'])): ?>
-                    <div class="col-12">
-                        <div class="app-card p-3" style="background:#f8fafc; box-shadow:none;">
+                    <div class="col-12 action-slip-detail-item action-slip-detail-wide">
+                        <div class="app-card p-3 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;">
                             <div class="text-muted small text-uppercase fw-semibold">Instruction</div>
                             <div class="mt-2"><?php echo nl2br(htmlspecialchars($slip['remarks'])); ?></div>
                         </div>
@@ -54,7 +54,7 @@ $statusStyle = [
                 <?php endif; ?>
             </div>
             <?php if (!empty($slip['attachment'])): ?>
-                <div class="mt-4 pt-3 border-top">
+                <div class="mt-4 pt-3 border-top action-slip-attachment-row">
                     <a href="<?php echo URLROOT; ?>/actionSlips/attachment/<?php echo (int) $slip['id']; ?>" target="_blank" class="btn btn-outline-primary">View Attachment</a>
                 </div>
             <?php endif; ?>
@@ -466,11 +466,55 @@ $statusStyle = [
     .action-slip-actions-col,
     .action-slip-actions-card {
         position: relative;
-        z-index: 1200;
+        z-index: 1;
     }
     .action-slip-history-card {
         position: relative;
         z-index: 1;
+    }
+    @media (max-width: 575.98px) {
+        .action-slip-info-card {
+            padding: 0.72rem !important;
+        }
+        .action-slip-info-head {
+            margin-bottom: 0.65rem !important;
+            gap: 0.55rem !important;
+        }
+        .action-slip-info-head .fs-4 {
+            font-size: 1.05rem !important;
+            line-height: 1.25;
+        }
+        .action-slip-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.55rem;
+        }
+        .action-slip-detail-item {
+            width: auto;
+            max-width: none;
+            padding: 0 !important;
+        }
+        .action-slip-detail-wide {
+            grid-column: 1 / -1;
+        }
+        .action-slip-detail-tile {
+            min-height: 0;
+            padding: 0.62rem !important;
+            border-radius: 13px;
+        }
+        .action-slip-detail-tile .small {
+            font-size: 0.66rem !important;
+            letter-spacing: 0.02em;
+        }
+        .action-slip-detail-tile .fw-bold {
+            margin-top: 0.28rem !important;
+            font-size: 0.88rem;
+            line-height: 1.28;
+        }
+        .action-slip-attachment-row {
+            margin-top: 0.65rem !important;
+            padding-top: 0.65rem !important;
+        }
     }
 </style>
 

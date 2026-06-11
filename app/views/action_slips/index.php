@@ -32,14 +32,14 @@ $statusClasses = [
     <?php endif; ?>
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4 das-stat-row">
     <div class="col-md-3"><div class="das-stat" style="background:#e0f2fe;"><span class="text-uppercase small text-muted">Visible Slips</span><strong><?php echo count($data['slips'] ?? []); ?></strong></div></div>
     <div class="col-md-3"><div class="das-stat" style="background:#fef3c7;"><span class="text-uppercase small text-muted">For Action</span><strong><?php echo (int) (($data['status_counts']['For Action'] ?? 0) + ($data['status_counts']['Delegated'] ?? 0)); ?></strong></div></div>
     <div class="col-md-3"><div class="das-stat" style="background:#dcfce7;"><span class="text-uppercase small text-muted">Completed</span><strong><?php echo (int) ($data['status_counts']['Completed'] ?? 0); ?></strong></div></div>
     <div class="col-md-3"><div class="das-stat" style="background:#fee2e2;"><span class="text-uppercase small text-muted">Returned</span><strong><?php echo (int) ($data['status_counts']['Returned'] ?? 0); ?></strong></div></div>
 </div>
 
-<div class="app-card p-4 mb-4">
+<div class="app-card list-filter-card p-4 mb-4">
     <form method="GET" class="row g-3 align-items-end">
         <div class="col-lg-3 col-md-6">
             <label class="form-label fw-semibold">Keyword</label>

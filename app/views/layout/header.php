@@ -48,6 +48,9 @@
 
         .app-shell { display: flex; min-height: 100vh; }
         .app-sidebar { width: 260px; padding: 1rem; position: sticky; top: 0; height: 100vh; }
+        .mobile-sidebar-head,
+        .mobile-sidebar-account,
+        .mobile-menu-toggle { display: none; }
         .app-sidebar-panel {
             height: 100%; border-radius: 24px; padding: 1rem;
             background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(245,248,252,0.92) 100%);
@@ -81,6 +84,30 @@
         .topbar-brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
         .topbar-brand img { width: 42px; height: 42px; object-fit: contain; border-radius: 11px; flex: 0 0 auto; }
         .topbar h2 { margin: 0; font-size: 1.05rem; font-weight: 800; }
+        .mobile-menu-toggle {
+            width: 42px;
+            height: 42px;
+            border: 1px solid var(--border-soft);
+            border-radius: 13px;
+            background: #fff;
+            color: var(--brand-deep);
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 4px;
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+        }
+        .mobile-menu-toggle span,
+        .mobile-menu-toggle::before,
+        .mobile-menu-toggle::after {
+            content: "";
+            display: block;
+            width: 18px;
+            height: 2px;
+            border-radius: 999px;
+            background: currentColor;
+        }
+        .mobile-menu-toggle span { margin: 0; }
         .topbar-user { position: relative; z-index: 1201; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
         .notification-toggle {
             position: relative; width: 40px; height: 40px; border-radius: 13px; border: 1px solid var(--border-soft);
@@ -264,41 +291,266 @@
         .content-frame .card-body.p-4 { padding: 1rem !important; }
         .content-frame .display-6 { font-size: 1.85rem; }
         .content-frame .table > :not(caption) > * > * { padding: 0.7rem 0.8rem; }
+        .table-responsive.table-scroll-10 {
+            max-height: 39rem;
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .table-responsive.table-scroll-10 thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .table-pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.65rem 0.75rem 0;
+            color: #64748b;
+            font-size: 0.84rem;
+        }
+        .table-pagination-actions {
+            display: inline-flex;
+            gap: 0.45rem;
+        }
 
         @media (max-width: 991.98px) {
             .app-shell { display: block; }
-            .app-sidebar { width: 100%; height: auto; position: static; padding: 0.85rem 0.85rem 0; }
-            .app-main { padding: 1rem; }
-            .app-sidebar-panel { height: auto; }
-            .page-hero, .topbar { flex-direction: column; align-items: stretch; }
-            .topbar-brand { justify-content: center; }
-            .topbar-user { justify-content: center; }
-            .notification-menu {
-                position: absolute;
-                z-index: 1300;
+            .app-sidebar {
+                width: 18.5rem;
+                max-width: min(88vw, 20rem);
+                height: 100vh;
+                position: fixed;
+                z-index: 2050;
+                padding: 0;
+                background: #eef3f7;
+                border-right: 1px solid rgba(148, 163, 184, 0.22);
+            }
+            .offcanvas-backdrop { z-index: 2040; }
+            .offcanvas-lg.show,
+            .offcanvas-lg.showing { z-index: 2050; }
+            .mobile-sidebar-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0.85rem 0.95rem 0;
+            }
+            .mobile-sidebar-head strong {
+                font-size: 0.92rem;
+                color: var(--brand-deep);
+            }
+            .app-sidebar-panel {
+                height: auto;
+                min-height: calc(100vh - 3.1rem);
+                border-radius: 0;
+                border: 0;
+                box-shadow: none;
+                padding: 0.85rem;
+            }
+            .mobile-sidebar-account {
+                display: block;
+                margin-top: auto;
+                padding-top: 0.85rem;
+                border-top: 1px solid rgba(148, 163, 184, 0.24);
+            }
+            .mobile-sidebar-account .user-chip {
                 width: 100%;
+                border-radius: 16px;
+                justify-content: flex-start;
+                margin-bottom: 0.65rem;
+            }
+            .mobile-sidebar-actions {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0.55rem;
+            }
+            .mobile-sidebar-actions .btn,
+            .mobile-sidebar-actions form,
+            .mobile-sidebar-actions button { width: 100%; }
+            .mobile-menu-toggle { display: inline-flex; flex: 0 0 auto; }
+            .app-main { padding: 0.7rem; }
+            .topbar {
+                position: sticky;
+                top: 0.5rem;
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                gap: 0.55rem;
+                margin-bottom: 0.7rem;
+                padding: 0.55rem 0.65rem;
+                border-radius: 16px;
+            }
+            .topbar-brand { flex: 1 1 auto; justify-content: flex-start; gap: 0.5rem; }
+            .topbar-brand img { width: 34px; height: 34px; border-radius: 9px; }
+            .topbar h2 { font-size: 0.88rem; line-height: 1.18; }
+            .topbar-user { flex: 0 0 auto; justify-content: flex-end; gap: 0; }
+            .topbar-user .user-chip,
+            .topbar-user > .btn,
+            .topbar-user > form { display: none !important; }
+            .notification-menu {
+                position: fixed !important;
+                top: 4.25rem !important;
+                left: 0.7rem !important;
+                right: 0.7rem !important;
+                transform: none !important;
+                z-index: 1300;
+                width: auto;
+                max-height: calc(100vh - 5.25rem);
+                overflow-y: auto;
             }
             .route-checkbox-group { max-height: 18rem; }
+            .page-hero {
+                padding: 0.7rem 0.8rem;
+                margin-bottom: 0.7rem;
+                border-radius: 16px;
+                flex-direction: row;
+                align-items: center;
+            }
+            .page-hero .btn { padding: 0.48rem 0.62rem; font-size: 0.88rem; }
+            .instruction-card { display: none; }
+            .dashboard-stat-row,
+            .documents-stat-row,
+            .das-stat-row { display: none; }
         }
 
         @media (max-width: 575.98px) {
-            .app-main { padding: 0.85rem; }
-            .topbar,
+            body { background: #eef3f7; }
+            .app-main { padding: 0.55rem; }
+            .content-frame { min-height: auto; }
+            .content-frame .mb-4,
+            .content-frame .app-card.mb-4,
+            .content-frame .card.mb-4,
+            .content-frame .alert.mb-4 { margin-bottom: 0.65rem !important; }
+            .content-frame .row.g-3,
+            .content-frame .row.g-4 {
+                --bs-gutter-x: 0.65rem;
+                --bs-gutter-y: 0.65rem;
+            }
             .page-hero,
-            .instruction-card,
             .content-frame .app-card.p-4,
             .content-frame .app-card.p-lg-5,
-            .content-frame .card-body.p-4 { padding: 0.85rem !important; }
-            .section-title { font-size: 1.35rem; }
-            .topbar h2 { font-size: 0.98rem; text-align: center; }
-            .user-chip { max-width: 100%; }
+            .content-frame .card-body.p-4 { padding: 0.72rem !important; }
+            .section-title { font-size: 1.2rem; line-height: 1.2; }
+            .form-label { font-size: 0.84rem; margin-bottom: 0.25rem; }
+            .form-control, .form-select, textarea.form-control {
+                min-height: 2.45rem;
+                padding: 0.52rem 0.68rem;
+                border-radius: 11px;
+            }
+            textarea.form-control { min-height: 5.4rem; }
+            .btn { padding: 0.5rem 0.68rem; border-radius: 11px; }
+            .btn-lg { padding: 0.55rem 0.75rem; font-size: 0.92rem; }
+            .table-responsive {
+                width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .table-responsive::-webkit-scrollbar { height: 8px; }
+            .table-responsive::-webkit-scrollbar-thumb {
+                background: #cbd5e1;
+                border-radius: 999px;
+            }
+            .table-modern,
+            .documents-table {
+                min-width: 44rem;
+                width: max-content;
+                table-layout: auto;
+            }
+            .documents-table { min-width: 48rem; }
+            .das-table-card .table-modern { min-width: 58rem; }
+            .action-slip-history-card .table-modern { min-width: 54rem; }
+            .table-modern thead th,
+            .documents-table thead th { font-size: 0.68rem; letter-spacing: 0.03em; }
+            .table-modern tbody td,
+            .documents-table td,
+            .documents-table th,
+            .content-frame .table > :not(caption) > * > * {
+                padding: 0.58rem 0.5rem;
+                font-size: 0.84rem;
+            }
+            .table-modern th,
+            .table-modern td,
+            .documents-table th,
+            .documents-table td {
+                white-space: nowrap;
+            }
+            .documents-title,
+            .das-title,
+            .fw-semibold {
+                overflow-wrap: anywhere;
+                white-space: normal;
+            }
+            .documents-meta,
+            .das-meta,
+            .text-muted.small { font-size: 0.76rem; }
+            .badge-soft,
+            .status-pill {
+                max-width: 100%;
+                white-space: nowrap;
+                text-align: center;
+                font-size: 0.68rem;
+                padding: 0.26rem 0.42rem;
+            }
+            .table-modern .btn-sm,
+            .documents-table .btn-sm {
+                padding: 0.34rem 0.44rem;
+                font-size: 0.74rem;
+                white-space: nowrap;
+            }
+            .documents-filters .row,
+            .list-filter-card .row {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.62rem !important;
+            }
+            .documents-filters .row > *,
+            .list-filter-card .row > * {
+                width: 100%;
+                max-width: none;
+                padding: 0 !important;
+            }
+            .documents-filters .row > :first-child,
+            .list-filter-card .row > :first-child,
+            .documents-filters .row > :last-child,
+            .list-filter-card .row > :last-child {
+                grid-column: 1 / -1;
+            }
+            .documents-filters .row > *:has(input[type="date"]),
+            .list-filter-card .row > *:has(input[type="date"]) {
+                display: none;
+            }
+            .documents-filters .d-grid,
+            .list-filter-card .d-grid,
+            .documents-filters .btn,
+            .list-filter-card .btn {
+                width: 100%;
+            }
+            .table-responsive.table-scroll-10 {
+                max-height: 31rem;
+            }
+            .table-pagination {
+                flex-wrap: wrap;
+                padding-inline: 0;
+            }
+            .route-checkbox-group,
+            .staff-picker-list { max-height: 12.5rem; }
+            .route-checkbox-item,
+            .staff-picker-option {
+                min-height: 2.7rem;
+                padding: 0.5rem 0.58rem;
+            }
         }
     </style>
 </head>
 <body>
 <div class="app-shell">
-    <aside class="app-sidebar">
-        <div class="app-sidebar-panel">
+    <aside class="app-sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="appSidebar" aria-labelledby="appSidebarLabel">
+        <div class="mobile-sidebar-head">
+            <strong id="appSidebarLabel">Menu</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#appSidebar" aria-label="Close"></button>
+        </div>
+        <div class="app-sidebar-panel offcanvas-body">
             <nav class="nav flex-column sidebar-nav">
                 <a class="sidebar-link <?php echo $currentSection === 'dashboard' ? 'active' : ''; ?>" href="<?php echo URLROOT; ?>/dashboard">
                     <span class="sidebar-icon">D</span>
@@ -335,11 +587,30 @@
                     </a>
                 <?php endif; ?>
             </nav>
+            <div class="mobile-sidebar-account">
+                <div class="user-chip">
+                    <span class="user-avatar"><?php echo strtoupper(substr(trim($_SESSION['fullname']), 0, 1)); ?></span>
+                    <div>
+                        <div class="fw-bold"><?php echo htmlspecialchars($_SESSION['fullname']); ?></div>
+                        <div class="small text-muted"><?php echo htmlspecialchars(ucfirst($_SESSION['role'] ?? 'user')); ?></div>
+                    </div>
+                </div>
+                <div class="mobile-sidebar-actions">
+                    <a href="<?php echo URLROOT; ?>/users/profile" class="btn btn-outline-secondary">Profile</a>
+                    <form action="<?php echo URLROOT; ?>/auth/logout" method="POST">
+                        <?php echo csrfInput(); ?>
+                        <button type="submit" class="btn btn-outline-danger">Logout</button>
+                    </form>
+                </div>
+            </div>
         </div>
     </aside>
 
     <main class="app-main">
         <div class="topbar">
+            <button class="mobile-menu-toggle d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#appSidebar" aria-controls="appSidebar" aria-label="Open menu">
+                <span></span>
+            </button>
             <div class="topbar-brand">
                 <img src="<?php echo URLROOT; ?>/assets/logo-nfa-da.jpg" alt="NFA Logo">
                 <h2><?php echo SITENAME; ?></h2>

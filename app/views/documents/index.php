@@ -44,7 +44,7 @@ $statusClasses = [
     <p>Use this list to monitor all documents visible to your department. Apply filters to narrow results, then open <strong>View Details</strong> to release, receive, clear, note, or forward a document based on your role.</p>
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4 documents-stat-row">
     <div class="col-md-3"><div class="documents-stat" style="background:#e0f2fe;"><span class="text-uppercase small text-muted">Visible Documents</span><strong><?php echo (int) ($data['total_documents'] ?? 0); ?></strong></div></div>
     <div class="col-md-3"><div class="documents-stat" style="background:#fef3c7;"><span class="text-uppercase small text-muted">Released</span><strong><?php echo (int) (($data['status_counts']['Released'] ?? 0) + ($data['status_counts']['Re-released'] ?? 0)); ?></strong></div></div>
     <div class="col-md-3"><div class="documents-stat" style="background:#e2e8f0;"><span class="text-uppercase small text-muted">Draft</span><strong><?php echo (int) (($data['status_counts']['Draft'] ?? 0)); ?></strong></div></div>
