@@ -99,6 +99,63 @@ class User {
         return $this->db->resultSet();
     }
 
+    public function searchWithDepartments($filters = [])
+    {
+        $conditions = [];
+        $params = [];
+
+        $keyword = trim($filters['q'] ?? '');
+        if ($keyword !== '') {
+            $conditions[] = "(
+                u.id_number LIKE :keyword_id
+                OR u.firstname LIKE :keyword_firstname
+                OR u.lastname LIKE :keyword_lastname
+                OR CONCAT_WS(' ', u.firstname, u.lastname) LIKE :keyword_full
+            )";
+            $keywordParam = '%' . $keyword . '%';
+            $params[':keyword_id'] = $keywordParam;
+            $params[':keyword_firstname'] = $keywordParam;
+            $params[':keyword_lastname'] = $keywordParam;
+            $params[':keyword_full'] = $keywordParam;
+        }
+
+        $departmentId = (int) ($filters['department_id'] ?? 0);
+        if ($departmentId > 0) {
+            $conditions[] = 'u.department_id = :department_id';
+            $params[':department_id'] = $departmentId;
+        }
+
+        $role = trim($filters['role'] ?? '');
+        if ($role !== '' && self::roleExists($role)) {
+            $conditions[] = 'u.role = :role';
+            $params[':role'] = $role;
+        }
+
+        $whereSql = '';
+        if (!empty($conditions)) {
+            $whereSql = 'WHERE ' . implode(' AND ', $conditions);
+        }
+
+        $this->db->query("
+            SELECT
+                u.*,
+                d.division_name AS department_name
+            FROM users u
+            LEFT JOIN departments d ON d.id = u.department_id
+            $whereSql
+            ORDER BY
+                CASE WHEN u.status = 'inactive' THEN 0 ELSE 1 END,
+                u.lastname ASC,
+                u.firstname ASC
+        ");
+
+        foreach ($params as $param => $value) {
+            $this->db->bind($param, $value);
+        }
+
+        return $this->db->resultSet();
+    }
+
     public function updateStatus($id, $status)
     {
         $this->db->query("

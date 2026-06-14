@@ -31,9 +31,25 @@ class Users extends Controller
         try {
             $this->requireAdmin();
 
+            $filters = [
+                'q' => trim($_GET['q'] ?? ''),
+                'department_id' => (int) ($_GET['department_id'] ?? 0),
+                'role' => trim($_GET['role'] ?? '')
+            ];
+
+            if ($filters['role'] !== '' && !User::roleExists($filters['role'])) {
+                $filters['role'] = '';
+            }
+
+            if ($filters['department_id'] > 0 && !$this->departmentModel->getDepartmentById($filters['department_id'])) {
+                $filters['department_id'] = 0;
+            }
+
             $data = [
-                'users' => $this->userModel->getAllWithDepartments(),
+                'users' => $this->userModel->searchWithDepartments($filters),
+                'departments' => $this->departmentModel->getAll(),
                 'roles' => User::roles(),
+                'filters' => $filters,
                 'success' => pullFlash('users_success')['message'] ?? '',
                 'error' => pullFlash('users_error')['message'] ?? ''
             ];

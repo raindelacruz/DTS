@@ -1,34 +1,57 @@
 <?php require_once '../app/views/layout/header.php'; ?>
 
 <?php
-$activeCount = 0;
-$inactiveCount = 0;
-foreach (($data['users'] ?? []) as $userSummary) {
-    if (($userSummary->status ?? '') === 'active') {
-        $activeCount++;
-    } else {
-        $inactiveCount++;
-    }
-}
+$filters = $data['filters'] ?? [];
 ?>
 
 <div class="page-hero">
     <div><h1 class="section-title">User Management</h1></div>
 </div>
 
-<div class="instruction-card">
-    <h3>Quick Guide</h3>
-    <p>Review user accounts here. Open a record with <strong>View</strong> to update password, role, status, or department.</p>
-</div>
-
-<div class="row g-4 mb-4">
-    <div class="col-md-4"><div class="app-card p-4 h-100" style="background:linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);"><div class="text-uppercase small text-muted fw-semibold">Total Users</div><div class="display-6 fw-bold mt-2"><?php echo count($data['users'] ?? []); ?></div></div></div>
-    <div class="col-md-4"><div class="app-card p-4 h-100" style="background:linear-gradient(135deg, #dcfce7 0%, #ecfdf5 100%);"><div class="text-uppercase small text-muted fw-semibold">Active</div><div class="display-6 fw-bold mt-2"><?php echo $activeCount; ?></div></div></div>
-    <div class="col-md-4"><div class="app-card p-4 h-100" style="background:linear-gradient(135deg, #fee2e2 0%, #fff1f2 100%);"><div class="text-uppercase small text-muted fw-semibold">Inactive</div><div class="display-6 fw-bold mt-2"><?php echo $inactiveCount; ?></div></div></div>
-</div>
-
 <?php if (!empty($data['success'])): ?><div class="alert alert-success app-card border-0 mb-4"><?php echo htmlspecialchars($data['success']); ?></div><?php endif; ?>
 <?php if (!empty($data['error'])): ?><div class="alert alert-danger app-card border-0 mb-4"><?php echo htmlspecialchars($data['error']); ?></div><?php endif; ?>
+
+<div class="app-card list-filter-card p-4 mb-4">
+    <form method="GET" action="<?php echo URLROOT; ?>/users" class="row g-3 align-items-end">
+        <div class="col-lg-4">
+            <label for="user_search" class="form-label fw-semibold">Search Name or ID Number</label>
+            <input
+                type="search"
+                id="user_search"
+                name="q"
+                class="form-control"
+                value="<?php echo htmlspecialchars($filters['q'] ?? ''); ?>"
+                placeholder="Enter name or ID number"
+            >
+        </div>
+        <div class="col-lg-3">
+            <label for="department_filter" class="form-label fw-semibold">Department</label>
+            <select id="department_filter" name="department_id" class="form-select">
+                <option value="0">All Departments</option>
+                <?php foreach (($data['departments'] ?? []) as $department): ?>
+                    <option value="<?php echo (int) $department['id']; ?>" <?php echo ((int) ($filters['department_id'] ?? 0) === (int) $department['id']) ? 'selected' : ''; ?>>
+                        <?php echo htmlspecialchars($department['division_name']); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="col-lg-2">
+            <label for="role_filter" class="form-label fw-semibold">Role</label>
+            <select id="role_filter" name="role" class="form-select">
+                <option value="">All Roles</option>
+                <?php foreach (($data['roles'] ?? []) as $roleKey => $roleLabel): ?>
+                    <option value="<?php echo htmlspecialchars($roleKey); ?>" <?php echo (($filters['role'] ?? '') === $roleKey) ? 'selected' : ''; ?>>
+                        <?php echo htmlspecialchars($roleLabel); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="col-lg-3 d-flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <a href="<?php echo URLROOT; ?>/users" class="btn btn-outline-secondary">Reset</a>
+        </div>
+    </form>
+</div>
 
 <div class="app-card p-4">
     <div class="table-responsive">
