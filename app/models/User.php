@@ -125,6 +125,19 @@ class User {
         return $this->db->execute();
     }
 
+    public function updateDepartment($id, $departmentId)
+    {
+        $this->db->query("
+            UPDATE users
+            SET department_id = :department_id
+            WHERE id = :id
+        ");
+        $this->db->bind(':department_id', $departmentId);
+        $this->db->bind(':id', $id);
+
+        return $this->db->execute();
+    }
+
     public function updatePassword($id, $password)
     {
         $this->db->query("

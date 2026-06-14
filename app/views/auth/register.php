@@ -65,13 +65,33 @@
                     <?php if (!empty($data['errors']['id_number'])): ?><div class="field-error"><?php echo htmlspecialchars($data['errors']['id_number']); ?></div><?php endif; ?>
                 </div>
                 <div class="field">
-                    <label for="department_id">Department</label>
-                    <select id="department_id" name="department_id" class="<?php echo !empty($data['errors']['department_id']) ? 'is-invalid' : ''; ?>" required>
-                        <option value="">Select Department</option>
+                    <?php
+                        $selectedDepartmentId = (string) ($data['values']['department_id'] ?? '');
+                        $selectedDepartmentName = '';
+                        foreach (($data['departments'] ?? []) as $department) {
+                            if ((string) $department['id'] === $selectedDepartmentId) {
+                                $selectedDepartmentName = $department['division_name'];
+                                break;
+                            }
+                        }
+                    ?>
+                    <label for="department_search">Office / Department / Division</label>
+                    <input id="department_id" type="hidden" name="department_id" value="<?php echo htmlspecialchars($selectedDepartmentId); ?>">
+                    <input
+                        id="department_search"
+                        type="text"
+                        list="department_options"
+                        value="<?php echo htmlspecialchars($selectedDepartmentName); ?>"
+                        class="<?php echo !empty($data['errors']['department_id']) ? 'is-invalid' : ''; ?>"
+                        placeholder="Search office, department, or division"
+                        autocomplete="off"
+                        required
+                    >
+                    <datalist id="department_options">
                         <?php foreach (($data['departments'] ?? []) as $department): ?>
-                            <option value="<?php echo $department['id']; ?>" <?php echo ((string) ($data['values']['department_id'] ?? '') === (string) $department['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($department['division_name']); ?></option>
+                            <option data-id="<?php echo (int) $department['id']; ?>" value="<?php echo htmlspecialchars($department['division_name']); ?>"></option>
                         <?php endforeach; ?>
-                    </select>
+                    </datalist>
                     <?php if (!empty($data['errors']['department_id'])): ?><div class="field-error"><?php echo htmlspecialchars($data['errors']['department_id']); ?></div><?php endif; ?>
                 </div>
                 <div class="field">
@@ -107,5 +127,31 @@
             <a href="<?php echo URLROOT; ?>/auth/login">Back to Login</a>
         </div>
     </div>
+    <script>
+        (function () {
+            const search = document.getElementById('department_search');
+            const departmentId = document.getElementById('department_id');
+            const options = Array.from(document.querySelectorAll('#department_options option'));
+            const departments = options.map((option) => ({
+                id: option.dataset.id,
+                name: option.value
+            }));
+
+            function syncDepartmentId() {
+                const selected = departments.find((department) => department.name === search.value.trim());
+                departmentId.value = selected ? selected.id : '';
+                search.setCustomValidity(selected || !search.value.trim() ? '' : 'Select a valid office, department, or division from the list.');
+            }
+
+            search.addEventListener('input', syncDepartmentId);
+            search.form.addEventListener('submit', function (event) {
+                syncDepartmentId();
+                if (!departmentId.value) {
+                    event.preventDefault();
+                    search.reportValidity();
+                }
+            });
+        })();
+    </script>
 </body>
 </html>

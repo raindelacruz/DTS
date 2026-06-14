@@ -746,7 +746,7 @@ class DepartmentActionSlip
     private function getActiveUsersByDepartmentAndRole($departmentId, $role)
     {
         $stmt = $this->db->prepare("
-            SELECT id, firstname, middle_initial, lastname, email, role
+            SELECT id, firstname, middle_initial, lastname, email, role, department_id
             FROM users
             WHERE department_id = :department_id
             AND role = :role

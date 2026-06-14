@@ -135,6 +135,7 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
                 <?php if (($_SESSION['role'] ?? '') === 'manager' && $isParentDepartment): ?>
                     <option value="Department" <?php echo (($values['receiving_level'] ?? 'Department') === 'Department') ? 'selected' : ''; ?>>Department</option>
                     <option value="Division" <?php echo (($values['receiving_level'] ?? '') === 'Division') ? 'selected' : ''; ?>>Division</option>
+                    <option value="Staff" <?php echo (($values['receiving_level'] ?? '') === 'Staff') ? 'selected' : ''; ?>>Staff</option>
                 <?php else: ?>
                     <option value="Staff" selected>Staff</option>
                 <?php endif; ?>
@@ -173,9 +174,10 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
                     <?php foreach (($data['division_staff'] ?? []) as $staff): ?>
                         <?php
                             $name = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? ''));
+                            $departmentName = trim($staff['department_name'] ?? '');
                             $staffId = (int) $staff['id'];
                         ?>
-                        <label class="staff-picker-option" data-staff-option data-staff-name="<?php echo htmlspecialchars(strtolower($name)); ?>">
+                        <label class="staff-picker-option" data-staff-option data-staff-name="<?php echo htmlspecialchars(strtolower($name . ' ' . $departmentName)); ?>">
                             <input type="checkbox" name="assigned_staff_ids[]" value="<?php echo $staffId; ?>" class="form-check-input m-0" <?php echo in_array($staffId, $selectedStaffIds, true) ? 'checked' : ''; ?>>
                             <span><?php echo htmlspecialchars($name); ?></span>
                         </label>

@@ -49,6 +49,38 @@ class Users extends Controller
         }
     }
 
+    public function show($id)
+    {
+        try {
+            $this->requireAdmin();
+
+            $user = $this->userModel->findWithDepartmentById((int) $id);
+            if (!$user) {
+                throw new NotFoundException('User not found.');
+            }
+
+            $data = [
+                'user' => $user,
+                'departments' => $this->departmentModel->getAll(),
+                'roles' => User::roles(),
+                'success' => pullFlash('users_success')['message'] ?? '',
+                'error' => pullFlash('users_error')['message'] ?? ''
+            ];
+
+            $this->view('users/show', $data);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to access user management.', 'error');
+            redirect('/dashboard', 303);
+        } catch (NotFoundException $e) {
+            flash('users_error', 'User not found.', 'error');
+            redirect('/users', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'users.show', 'target_user_id' => (int) $id, 'user_id' => $_SESSION['user_id'] ?? null]);
+            flash('users_error', 'We could not load that user right now.', 'error');
+            redirect('/users', 303);
+        }
+    }
+
     public function profile()
     {
         try {
@@ -196,6 +228,7 @@ class Users extends Controller
     public function updateRole($id)
     {
         $role = trim($_POST['role'] ?? '');
+        $redirectPath = '/users/show/' . (int) $id;
 
         try {
             $this->requireAdmin();
@@ -217,7 +250,7 @@ class Users extends Controller
 
             if ((string) $user->role === $role) {
                 flash('users_success', 'Role is already up to date.', 'success');
-                redirect('/users', 303);
+                redirect($redirectPath, 303);
             }
 
             $this->userModel->updateRole((int) $id, $role);
@@ -230,22 +263,76 @@ class Users extends Controller
             );
 
             flash('users_success', 'User role updated successfully.', 'success');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         } catch (AuthorizationException $e) {
             flash('users_error', 'You are not allowed to change user roles.', 'error');
             redirect('/dashboard', 303);
         } catch (ValidationException $e) {
             flash('users_error', $e->getMessage(), 'error');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         } catch (Throwable $e) {
             reportException($e, ['action' => 'users.updateRole', 'target_user_id' => (int) $id, 'role' => $role]);
             flash('users_error', 'We could not update that role right now. Please try again.', 'error');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
+        }
+    }
+
+    public function updateDepartment($id)
+    {
+        $departmentId = (int) ($_POST['department_id'] ?? 0);
+        $redirectPath = '/users/show/' . (int) $id;
+
+        try {
+            $this->requireAdmin();
+            requirePost();
+            validateCsrfOrFail();
+
+            $user = $this->userModel->findById((int) $id);
+            if (!$user) {
+                throw new ValidationException('User not found.');
+            }
+
+            if ($departmentId <= 0 || !$this->departmentModel->getDepartmentById($departmentId)) {
+                throw new ValidationException('Please select a valid department.');
+            }
+
+            if ((int) $user->department_id === $departmentId) {
+                flash('users_success', 'Department is already up to date.', 'success');
+                redirect($redirectPath, 303);
+            }
+
+            $this->userModel->updateDepartment((int) $id, $departmentId);
+
+            if ((int) $user->id === (int) $_SESSION['user_id']) {
+                $_SESSION['department_id'] = $departmentId;
+            }
+
+            $this->notificationModel->create(
+                (int) $user->id,
+                'Department updated',
+                'Your account department has been updated by an administrator.',
+                '/users/profile'
+            );
+
+            flash('users_success', 'User department updated successfully.', 'success');
+            redirect($redirectPath, 303);
+        } catch (AuthorizationException $e) {
+            flash('users_error', 'You are not allowed to change user departments.', 'error');
+            redirect('/dashboard', 303);
+        } catch (ValidationException $e) {
+            flash('users_error', $e->getMessage(), 'error');
+            redirect($redirectPath, 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'users.updateDepartment', 'target_user_id' => (int) $id, 'department_id' => $departmentId]);
+            flash('users_error', 'We could not update that department right now. Please try again.', 'error');
+            redirect($redirectPath, 303);
         }
     }
 
     public function updateUserPassword($id)
     {
+        $redirectPath = '/users/show/' . (int) $id;
+
         try {
             $this->requireAdmin();
             requirePost();
@@ -277,22 +364,36 @@ class Users extends Controller
             );
 
             flash('users_success', 'User password updated successfully.', 'success');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         } catch (AuthorizationException $e) {
             flash('users_error', 'You are not allowed to change user passwords.', 'error');
             redirect('/dashboard', 303);
         } catch (ValidationException $e) {
             flash('users_error', $e->getMessage(), 'error');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         } catch (Throwable $e) {
             reportException($e, ['action' => 'users.updateUserPassword', 'target_user_id' => (int) $id]);
             flash('users_error', 'We could not update that password right now. Please try again.', 'error');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         }
+    }
+
+    public function updateStatus($id)
+    {
+        $status = trim($_POST['status'] ?? '');
+
+        if (!in_array($status, ['active', 'inactive'], true)) {
+            flash('users_error', 'Please select a valid status.', 'error');
+            redirect('/users/show/' . (int) $id, 303);
+        }
+
+        $this->setStatus($id, $status);
     }
 
     private function setStatus($id, $status)
     {
+        $redirectPath = '/users/show/' . (int) $id;
+
         try {
             $this->requireAdmin();
             requirePost();
@@ -323,17 +424,17 @@ class Users extends Controller
                 $status === 'active' ? 'User activated successfully.' : 'User deactivated successfully.',
                 'success'
             );
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         } catch (AuthorizationException $e) {
             flash('users_error', 'You are not allowed to change user status.', 'error');
             redirect('/dashboard', 303);
         } catch (ValidationException $e) {
             flash('users_error', $e->getMessage(), 'error');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         } catch (Throwable $e) {
             reportException($e, ['action' => 'users.setStatus', 'target_user_id' => (int) $id, 'status' => $status]);
             flash('users_error', 'We could not update that account right now. Please try again.', 'error');
-            redirect('/users', 303);
+            redirect($redirectPath, 303);
         }
     }
 }
