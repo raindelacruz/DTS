@@ -535,7 +535,7 @@ class ActionSlips extends Controller
                 'events' => $this->slipModel->getEvents($slipId),
                 'departments' => $this->departmentModel->getParentDepartments(),
                 'child_divisions' => $this->departmentModel->getChildDepartmentsForParent($currentDepartmentId),
-                'division_staff' => $currentDivisionId > 0 ? $this->slipModel->getActiveStaffByDepartment($currentDivisionId) : [],
+                'division_staff' => $this->slipModel->getActiveStaffByDepartment($currentDivisionId > 0 ? $currentDivisionId : $currentDepartmentId),
                 'actions' => $this->allowedActions($slip),
                 'action_options' => DepartmentActionSlip::actionOptions()
             ];

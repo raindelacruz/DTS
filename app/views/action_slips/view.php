@@ -9,6 +9,11 @@ $isDivisionDraftManager = !empty($actions['finalize_draft'])
     && (($_SESSION['role'] ?? '') === 'manager')
     && $currentDivisionIdForSlip > 0
     && (int) ($_SESSION['department_id'] ?? 0) === $currentDivisionIdForSlip;
+$isDepartmentDraftManager = !empty($actions['finalize_draft'])
+    && (($_SESSION['role'] ?? '') === 'manager')
+    && $currentDivisionIdForSlip === 0
+    && (int) ($_SESSION['department_id'] ?? 0) === $currentDepartmentIdForSlip;
+$canDraftForwardToStaff = $isDivisionDraftManager || $isDepartmentDraftManager;
 $statusStyle = [
     'Draft' => 'background:#e0f2fe; color:#075985;',
     'Released' => 'background:#fef3c7; color:#92400e;',
@@ -97,6 +102,7 @@ $statusStyle = [
                             <?php else: ?>
                                 <option value="Department">Department</option>
                                 <option value="Division">Division</option>
+                                <option value="Staff">Staff</option>
                             <?php endif; ?>
                         </select>
                         <?php if ($isDivisionDraftManager): ?>
@@ -182,7 +188,7 @@ $statusStyle = [
                                 </div>
                             </div>
                         </div>
-                        <?php if ($isDivisionDraftManager): ?>
+                        <?php if ($canDraftForwardToStaff): ?>
                             <div data-draft-staff-wrap>
                                 <label id="draft_assigned_staff_label" class="form-label small fw-semibold">Target Staff</label>
                                 <div class="route-multiselect mb-2" data-draft-staff-multiselect>
@@ -466,7 +472,12 @@ $statusStyle = [
     .action-slip-actions-col,
     .action-slip-actions-card {
         position: relative;
-        z-index: 1;
+        z-index: 20;
+    }
+    .action-slip-main-row:has(.route-multiselect-menu:not(.d-none)),
+    .action-slip-actions-col:has(.route-multiselect-menu:not(.d-none)),
+    .action-slip-actions-card:has(.route-multiselect-menu:not(.d-none)) {
+        z-index: 1500;
     }
     .action-slip-history-card {
         position: relative;
