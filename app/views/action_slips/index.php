@@ -20,6 +20,18 @@ $statusClasses = [
     .das-title { font-weight: 700; color: #0f172a; }
     .das-meta { color: #64748b; font-size: 0.84rem; }
     .status-pill { border-radius: 999px; font-size: 0.74rem; font-weight: 800; padding: 0.34rem 0.62rem; display: inline-block; white-space: nowrap; }
+    .das-filter-card { padding: 1rem !important; overflow-x: auto; }
+    .das-filter-form {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.25fr) repeat(4, minmax(150px, 1fr)) 86px 96px;
+        gap: 0.75rem;
+        align-items: end;
+        min-width: 1060px;
+    }
+    .das-filter-form > * { min-width: 0; }
+    .das-filter-form .form-label { white-space: nowrap; }
+    .das-filter-actions { display: grid; }
+    .das-filter-form .btn { min-height: 46px; }
 </style>
 
 <div class="page-hero compact">
@@ -39,13 +51,13 @@ $statusClasses = [
     <div class="col-md-3"><div class="das-stat" style="background:#fee2e2;"><span class="text-uppercase small text-muted">Returned</span><strong><?php echo (int) ($data['status_counts']['Returned'] ?? 0); ?></strong></div></div>
 </div>
 
-<div class="app-card list-filter-card p-4 mb-4">
-    <form method="GET" class="row g-3 align-items-end">
-        <div class="col-lg-3 col-md-6">
+<div class="app-card list-filter-card das-filter-card mb-4">
+    <form method="GET" class="das-filter-form">
+        <div>
             <label class="form-label fw-semibold">Keyword</label>
-            <input type="text" name="keyword" class="form-control" value="<?php echo htmlspecialchars($filters['keyword'] ?? ''); ?>">
+            <input type="text" name="keyword" class="form-control" placeholder="Tracking no. or instruction" value="<?php echo htmlspecialchars($filters['keyword'] ?? ''); ?>">
         </div>
-        <div class="col-lg-3 col-md-6">
+        <div>
             <label class="form-label fw-semibold">Status</label>
             <select name="status" class="form-select">
                 <option value="">All Status</option>
@@ -54,7 +66,7 @@ $statusClasses = [
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-lg-3 col-md-6">
+        <div>
             <label class="form-label fw-semibold">Department</label>
             <select name="department_id" class="form-select">
                 <option value="">All Departments</option>
@@ -63,7 +75,7 @@ $statusClasses = [
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-lg-3 col-md-6">
+        <div>
             <label class="form-label fw-semibold">Division</label>
             <select name="division_id" class="form-select">
                 <option value="">All Divisions</option>
@@ -72,7 +84,7 @@ $statusClasses = [
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-lg-3 col-md-6">
+        <div>
             <label class="form-label fw-semibold">Assigned Staff</label>
             <select name="assigned_staff_id" class="form-select">
                 <option value="">All Staff</option>
@@ -82,24 +94,8 @@ $statusClasses = [
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-lg-2 col-md-6">
-            <label class="form-label fw-semibold">Action Slip From</label>
-            <input type="date" name="date_received_from" class="form-control" value="<?php echo htmlspecialchars($filters['date_received_from'] ?? ''); ?>">
-        </div>
-        <div class="col-lg-2 col-md-6">
-            <label class="form-label fw-semibold">Action Slip To</label>
-            <input type="date" name="date_received_to" class="form-control" value="<?php echo htmlspecialchars($filters['date_received_to'] ?? ''); ?>">
-        </div>
-        <div class="col-lg-2 col-md-6">
-            <label class="form-label fw-semibold">Deadline From</label>
-            <input type="date" name="deadline_from" class="form-control" value="<?php echo htmlspecialchars($filters['deadline_from'] ?? ''); ?>">
-        </div>
-        <div class="col-lg-2 col-md-6">
-            <label class="form-label fw-semibold">Deadline To</label>
-            <input type="date" name="deadline_to" class="form-control" value="<?php echo htmlspecialchars($filters['deadline_to'] ?? ''); ?>">
-        </div>
-        <div class="col-lg-1 col-md-6 d-grid"><button type="submit" class="btn btn-primary">Apply</button></div>
-        <div class="col-12"><a href="<?php echo URLROOT; ?>/actionSlips" class="btn btn-outline-secondary btn-sm">Reset Filters</a></div>
+        <div class="das-filter-actions"><button type="submit" class="btn btn-primary">Apply</button></div>
+        <div class="das-filter-actions"><a href="<?php echo URLROOT; ?>/actionSlips" class="btn btn-outline-secondary">Reset</a></div>
     </form>
 </div>
 

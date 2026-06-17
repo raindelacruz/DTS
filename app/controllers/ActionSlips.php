@@ -51,11 +51,7 @@ class ActionSlips extends Controller
             'status' => trim($_GET['status'] ?? ''),
             'department_id' => (int) ($_GET['department_id'] ?? 0),
             'division_id' => (int) ($_GET['division_id'] ?? 0),
-            'assigned_staff_id' => (int) ($_GET['assigned_staff_id'] ?? 0),
-            'date_received_from' => trim($_GET['date_received_from'] ?? ''),
-            'date_received_to' => trim($_GET['date_received_to'] ?? ''),
-            'deadline_from' => trim($_GET['deadline_from'] ?? ''),
-            'deadline_to' => trim($_GET['deadline_to'] ?? '')
+            'assigned_staff_id' => (int) ($_GET['assigned_staff_id'] ?? 0)
         ];
     }
 

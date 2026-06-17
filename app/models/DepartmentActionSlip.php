@@ -582,7 +582,7 @@ class DepartmentActionSlip
     private function applyFilters(&$where, &$params, $filters)
     {
         if (trim($filters['keyword'] ?? '') !== '') {
-            $where[] = "(das.slip_number LIKE :keyword OR das.required_action LIKE :keyword OR das.subject LIKE :keyword OR das.external_source LIKE :keyword OR das.reference_number LIKE :keyword)";
+            $where[] = "(das.slip_number LIKE :keyword OR das.remarks LIKE :keyword)";
             $params['keyword'] = '%' . trim($filters['keyword']) . '%';
         }
 
@@ -604,26 +604,6 @@ class DepartmentActionSlip
         if ((int) ($filters['assigned_staff_id'] ?? 0) > 0) {
             $where[] = "das.assigned_staff_id = :filter_assigned_staff_id";
             $params['filter_assigned_staff_id'] = (int) $filters['assigned_staff_id'];
-        }
-
-        if (trim($filters['date_received_from'] ?? '') !== '') {
-            $where[] = "das.date_received >= :date_received_from";
-            $params['date_received_from'] = trim($filters['date_received_from']);
-        }
-
-        if (trim($filters['date_received_to'] ?? '') !== '') {
-            $where[] = "das.date_received <= :date_received_to";
-            $params['date_received_to'] = trim($filters['date_received_to']);
-        }
-
-        if (trim($filters['deadline_from'] ?? '') !== '') {
-            $where[] = "das.deadline >= :deadline_from";
-            $params['deadline_from'] = trim($filters['deadline_from']);
-        }
-
-        if (trim($filters['deadline_to'] ?? '') !== '') {
-            $where[] = "das.deadline <= :deadline_to";
-            $params['deadline_to'] = trim($filters['deadline_to']);
         }
     }
 
