@@ -26,6 +26,11 @@ class Documents extends Controller
         return (($_SESSION['role'] ?? '') === 'manager');
     }
 
+    private function isStaff()
+    {
+        return (($_SESSION['role'] ?? '') === 'staff');
+    }
+
     private function requireParentDepartment()
     {
         $isParent = $this->departmentModel->isParentDepartment((int) $_SESSION['department_id']);
@@ -45,6 +50,11 @@ class Documents extends Controller
         return $this->isManager() && $this->isDivisionDepartment((int) $_SESSION['department_id']);
     }
 
+    private function isDivisionStaff()
+    {
+        return $this->isStaff() && $this->isDivisionDepartment((int) $_SESSION['department_id']);
+    }
+
     private function canCurrentManagerDelegateInternally($documentId, $departmentId)
     {
         if (!$this->isManager() || !$this->isDivisionDepartment($departmentId)) {
@@ -52,11 +62,41 @@ class Documents extends Controller
         }
 
         $route = $this->documentModel->getDepartmentRouteRole($documentId, $departmentId);
+        $document = $this->documentModel->findById((int) $documentId);
         $existingAssignment = $this->documentModel->getCurrentInternalAssignment($documentId, $departmentId);
+        $managerCompleted = $this->managerHasSpecificAction($documentId, $departmentId, 'Manager Completed');
+        $isSameDivisionManagerRoute = $document
+            && (int) ($document['origin_department_id'] ?? 0) === (int) $departmentId
+            && ($route['route_type'] ?? '') === 'TO';
 
-        return $route
-            && ($route['route_type'] ?? '') === 'DELEGATE'
+        return $document
+            && ($document['status'] ?? '') !== 'Returned'
+            && !$managerCompleted
+            && $route
             && (int) ($route['is_cleared'] ?? 0) === 1
+            && (($route['route_type'] ?? '') === 'DELEGATE' || $isSameDivisionManagerRoute)
+            && $this->managerHasAcknowledged($documentId, $departmentId)
+            && !$existingAssignment;
+    }
+
+    private function canCurrentManagerResolveDivisionDocument($documentId, $departmentId)
+    {
+        if (!$this->isManager() || !$this->isDivisionDepartment($departmentId)) {
+            return false;
+        }
+
+        $document = $this->documentModel->findById((int) $documentId);
+        $route = $this->documentModel->getDepartmentRouteRole($documentId, $departmentId);
+        $existingAssignment = $this->documentModel->getCurrentInternalAssignment($documentId, $departmentId);
+        $isSameDivisionManagerRoute = $document
+            && (int) ($document['origin_department_id'] ?? 0) === (int) $departmentId
+            && ($route['route_type'] ?? '') === 'TO';
+
+        return $document
+            && ($document['status'] ?? '') !== 'Returned'
+            && $route
+            && (int) ($route['is_cleared'] ?? 0) === 1
+            && (($route['route_type'] ?? '') === 'DELEGATE' || $isSameDivisionManagerRoute)
             && $this->managerHasAcknowledged($documentId, $departmentId)
             && !$existingAssignment;
     }
@@ -193,6 +233,7 @@ class Documents extends Controller
             'to_department_ids' => [],
             'cc_department_ids' => [],
             'delegate_department_ids' => [],
+            'manager_recipient_ids' => [],
             'assigned_staff_ids' => []
         ];
     }
@@ -224,6 +265,7 @@ class Documents extends Controller
             'to_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['to_department_ids'] ?? [])))),
             'cc_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['cc_department_ids'] ?? [])))),
             'delegate_department_ids' => array_values(array_unique(array_filter(array_map('intval', $source['delegate_department_ids'] ?? [])))),
+            'manager_recipient_ids' => array_values(array_unique(array_filter(array_map('intval', $source['manager_recipient_ids'] ?? [])))),
             'assigned_staff_ids' => array_values(array_unique(array_filter(array_map('intval', $source['assigned_staff_ids'] ?? []))))
         ];
     }
@@ -257,12 +299,14 @@ class Documents extends Controller
         $toDepartmentIds = $values['to_department_ids'];
         $ccDepartmentIds = $values['cc_department_ids'];
         $delegateDepartmentIds = $values['delegate_department_ids'];
+        $managerRecipientIds = $values['manager_recipient_ids'];
         $assignedStaffIds = $values['assigned_staff_ids'];
         $originDepartmentId = (int) $_SESSION['department_id'];
+        $isDivisionStaff = $this->isDivisionStaff();
         $isDivisionManager = $this->isDivisionManager();
 
-        if (empty($toDepartmentIds) && empty($delegateDepartmentIds) && empty($assignedStaffIds)) {
-            $errors['to_department_ids'] = 'Select at least one TO department, internal division, or staff recipient.';
+        if (empty($toDepartmentIds) && empty($delegateDepartmentIds) && empty($managerRecipientIds) && empty($assignedStaffIds)) {
+            $errors['to_department_ids'] = 'Select at least one TO department, internal division, division manager, or staff recipient.';
         }
 
         if ($thruDepartmentId !== null) {
@@ -286,7 +330,7 @@ class Documents extends Controller
                 && !in_array($departmentId, $ccDepartmentIds, true);
         }));
 
-        if (!empty($values['to_department_ids']) && empty($toDepartmentIds) && empty($delegateDepartmentIds)) {
+        if (!empty($values['to_department_ids']) && empty($toDepartmentIds) && empty($delegateDepartmentIds) && empty($managerRecipientIds)) {
             $errors['to_department_ids'] = 'TO must still contain at least one department after THRU validation.';
         }
 
@@ -302,6 +346,23 @@ class Documents extends Controller
 
         if (!empty($delegateDepartmentIds) && !$this->departmentModel->areChildDepartmentsOfParent($delegateDepartmentIds, $originDepartmentId)) {
             $errors['delegate_department_ids'] = 'Internal routing is limited to your own child division only.';
+        }
+
+        if (!empty($managerRecipientIds)) {
+            if (!$isDivisionStaff) {
+                $errors['manager_recipient_ids'] = 'Only division staff can send documents directly to division managers.';
+            } else {
+                foreach ($managerRecipientIds as $managerId) {
+                    if (!$this->documentModel->findActiveManagerInDepartment((int) $managerId, $originDepartmentId)) {
+                        $errors['manager_recipient_ids'] = 'Select active managers under your division.';
+                        break;
+                    }
+                }
+
+                if (empty($errors['manager_recipient_ids']) && !in_array($originDepartmentId, $toDepartmentIds, true)) {
+                    $toDepartmentIds[] = $originDepartmentId;
+                }
+            }
         }
 
         if (!empty($assignedStaffIds)) {
@@ -330,6 +391,7 @@ class Documents extends Controller
             'to_department_ids' => $toDepartmentIds,
             'cc_department_ids' => $ccDepartmentIds,
             'delegate_department_ids' => $delegateDepartmentIds,
+            'manager_recipient_ids' => $managerRecipientIds,
             'assigned_staff_ids' => $assignedStaffIds
         ];
     }
@@ -543,6 +605,18 @@ class Documents extends Controller
             }
         }
 
+        $departmentIds = array_values(array_unique(array_filter(array_map('intval', (array) $departmentIds))));
+        $divisionManagerRouteDepartmentIds = [];
+        if ($this->isDivisionStaff()) {
+            $currentDepartmentId = (int) $_SESSION['department_id'];
+            if (in_array($currentDepartmentId, $departmentIds, true)) {
+                $divisionManagerRouteDepartmentIds[] = $currentDepartmentId;
+                $departmentIds = array_values(array_filter($departmentIds, function ($departmentId) use ($currentDepartmentId) {
+                    return (int) $departmentId !== $currentDepartmentId;
+                }));
+            }
+        }
+
         $this->notificationModel->notifyDepartmentStaffUsers(
             $departmentIds,
             $title,
@@ -550,6 +624,16 @@ class Documents extends Controller
             '/documents/show/' . $documentId,
             (int) $_SESSION['user_id']
         );
+
+        if (!empty($divisionManagerRouteDepartmentIds)) {
+            $this->notificationModel->notifyDepartmentManagers(
+                $divisionManagerRouteDepartmentIds,
+                $title,
+                $message,
+                '/documents/show/' . $documentId,
+                (int) $_SESSION['user_id']
+            );
+        }
     }
 
     private function getRouteDepartmentIdsByTypes($documentId, $types, $excludeDepartmentIds = [])
@@ -595,8 +679,10 @@ class Documents extends Controller
         $state = pullFormState('document_create', $this->documentFormDefaults());
         $departments = $this->departmentModel->getParentDepartments();
         $isDivisionManager = $this->isDivisionManager();
+        $isDivisionStaff = $this->isDivisionStaff();
         $childDepartments = $isDivisionManager ? [] : $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
         $divisionStaff = $isDivisionManager ? $this->documentModel->getActiveStaffByDepartment((int) $_SESSION['department_id']) : [];
+        $divisionManagers = $isDivisionStaff ? $this->documentModel->getActiveManagersByDepartment((int) $_SESSION['department_id']) : [];
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -608,6 +694,7 @@ class Documents extends Controller
         $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
         $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
         $selectedDelegateDepartmentIds = array_map('intval', $state['values']['delegate_department_ids'] ?? []);
+        $selectedManagerIds = array_map('intval', $state['values']['manager_recipient_ids'] ?? []);
         $selectedStaffIds = array_map('intval', $state['values']['assigned_staff_ids'] ?? []);
         $submitLabel = 'Create Document';
         $formAction = URLROOT . '/documents/store';
@@ -642,8 +729,10 @@ class Documents extends Controller
         $state = pullFormState('document_edit_' . (int) $document['id'], $defaults);
         $departments = $this->departmentModel->getParentDepartments();
         $isDivisionManager = $this->isDivisionManager();
+        $isDivisionStaff = $this->isDivisionStaff();
         $childDepartments = $isDivisionManager ? [] : $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
         $divisionStaff = $isDivisionManager ? $this->documentModel->getActiveStaffByDepartment((int) $_SESSION['department_id']) : [];
+        $divisionManagers = $isDivisionStaff ? $this->documentModel->getActiveManagersByDepartment((int) $_SESSION['department_id']) : [];
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -655,6 +744,12 @@ class Documents extends Controller
         $selectedToDepartmentIds = array_map('intval', $state['values']['to_department_ids'] ?? []);
         $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
         $selectedDelegateDepartmentIds = array_map('intval', $state['values']['delegate_department_ids'] ?? []);
+        $selectedManagerIds = array_map('intval', $state['values']['manager_recipient_ids'] ?? []);
+        if (empty($selectedManagerIds) && $isDivisionStaff && in_array((int) $_SESSION['department_id'], $selectedToDepartmentIds, true)) {
+            $selectedManagerIds = array_map(function ($manager) {
+                return (int) $manager['id'];
+            }, $divisionManagers);
+        }
         $selectedStaffIds = array_map('intval', $state['values']['assigned_staff_ids'] ?? []);
         $formAction = URLROOT . '/documents/update/' . (int) $document['id'];
         $submitLabel = 'Save Changes';
@@ -706,6 +801,10 @@ class Documents extends Controller
         }
 
         if ($this->documentModel->getCurrentInternalAssignmentForUser((int) $document['id'], (int) $_SESSION['user_id'])) {
+            return false;
+        }
+
+        if ((int) ($document['origin_department_id'] ?? 0) === (int) $deptId) {
             return false;
         }
 
@@ -1040,6 +1139,14 @@ class Documents extends Controller
                     throw new ValidationException('Returned documents must be corrected and re-released before receipt.');
                 }
 
+                if (
+                    !$this->isManager()
+                    && ($route['route_type'] ?? '') === 'TO'
+                    && (int) ($document['origin_department_id'] ?? 0) === $deptId
+                ) {
+                    throw new ValidationException('Documents released to division managers must be received by a manager.');
+                }
+
                 if ($route['route_type'] !== 'THRU' && !$this->documentModel->isThruCleared($documentId)) {
                     throw new ValidationException('Document is waiting for THRU clearance.');
                 }
@@ -1298,13 +1405,28 @@ class Documents extends Controller
 
             $document = $this->documentModel->findById($documentId);
             $deptId = (int) $_SESSION['department_id'];
+            $route = $this->documentModel->getDepartmentRouteRole($documentId, $deptId);
+            $routeCleared = $route && (int) ($route['is_cleared'] ?? 0) === 1;
+            $routeNeedsManagerReceiptStatus = $route
+                && in_array($route['route_type'] ?? '', ['TO', 'DELEGATE'], true)
+                && !$routeCleared;
+            $managerAcknowledged = $this->managerHasAcknowledged($documentId, $deptId);
 
             if (!$document || !$this->managerStaffHandled($documentId, $deptId)) {
                 throw new ValidationException('Document is not ready for manager action.');
             }
 
-            if (!$this->managerHasAcknowledged($documentId, $deptId)) {
-                $this->documentModel->addDocumentLog($documentId, 'Manager Received', (int) $_SESSION['user_id'], $deptId, 'Document received by manager');
+            if (($document['status'] ?? '') === 'Returned') {
+                throw new ValidationException('Returned documents must be corrected and re-released before manager receipt.');
+            }
+
+            if (!$managerAcknowledged || $routeNeedsManagerReceiptStatus) {
+                $this->documentModel->receiveDocumentByManager(
+                    $documentId,
+                    (int) $_SESSION['user_id'],
+                    $deptId,
+                    !$managerAcknowledged
+                );
                 $this->notificationModel->create((int) $document['created_by'], 'Manager received document', $document['prefix'] . ' was received by the manager.', '/documents/show/' . $documentId);
             }
 
@@ -1319,6 +1441,126 @@ class Documents extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'documents.managerReceive', 'document_id' => $documentId]);
             flash('error', 'We could not record manager receipt right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function managerReturnDocument($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can return documents.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $deptId = (int) $_SESSION['department_id'];
+            if (!$this->canCurrentManagerResolveDivisionDocument($documentId, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $remarks = trim($_POST['manager_return_remarks'] ?? '');
+            if ($remarks === '') {
+                throw new ValidationException('Enter return remarks.');
+            }
+
+            $this->documentModel->returnDocumentByManager(
+                $documentId,
+                (int) $_SESSION['user_id'],
+                $deptId,
+                $remarks
+            );
+
+            if (!empty($document['created_by']) && (int) $document['created_by'] !== (int) $_SESSION['user_id']) {
+                $this->notificationModel->create(
+                    (int) $document['created_by'],
+                    'Document returned by manager',
+                    $document['prefix'] . ' was returned by the manager.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Document returned with remarks.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to return that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.managerReturnDocument', 'document_id' => $documentId]);
+            flash('error', 'We could not return that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function managerCompleteDocument($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can complete documents.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $deptId = (int) $_SESSION['department_id'];
+            if (!$this->canCurrentManagerResolveDivisionDocument($documentId, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $remarks = trim($_POST['manager_completion_remarks'] ?? '');
+            if ($remarks === '') {
+                throw new ValidationException('Enter completion remarks.');
+            }
+
+            $this->documentModel->completeDocumentByManager(
+                $documentId,
+                (int) $_SESSION['user_id'],
+                $deptId,
+                $remarks
+            );
+
+            if (!empty($document['created_by']) && (int) $document['created_by'] !== (int) $_SESSION['user_id']) {
+                $this->notificationModel->create(
+                    (int) $document['created_by'],
+                    'Document completed by manager',
+                    $document['prefix'] . ' was marked completed by the manager.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Document marked completed.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to complete that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.managerCompleteDocument', 'document_id' => $documentId]);
+            flash('error', 'We could not complete that document right now. Please try again.', 'error');
             redirect('/documents/show/' . $documentId, 303);
         }
     }
@@ -1494,9 +1736,6 @@ class Documents extends Controller
 
             $remarks = trim($_POST['completion_remarks'] ?? '');
             $attachment = $this->handleAttachmentUpload('completion_attachment');
-            if ($attachment === null) {
-                throw new ValidationException('Upload a completion attachment before marking this assignment completed.');
-            }
 
             $managerUserId = $this->documentModel->completeInternalAssignmentWithAttachment(
                 $documentId,
@@ -1705,9 +1944,13 @@ class Documents extends Controller
             $isParentDepartment = $this->departmentModel->isParentDepartment($deptId);
             $hasDelegatedChild = $this->documentModel->hasDelegatedToChild($documentId, $deptId);
             $isManager = $this->isManager();
+            $isDivisionManagerRouteForStaff = !$isManager
+                && $routeType === 'TO'
+                && (int) ($document['origin_department_id'] ?? 0) === $deptId;
             $managerAcknowledged = $this->managerHasAcknowledged($documentId, $deptId);
             $managerThruCleared = $this->managerHasSpecificAction($documentId, $deptId, 'Cleared THRU');
             $managerCcNoted = $this->managerHasSpecificAction($documentId, $deptId, 'Noted CC');
+            $managerCompleted = $this->managerHasSpecificAction($documentId, $deptId, 'Manager Completed');
             $recipientActionDetails = null;
             $referencedDocument = null;
             $latestRecipientRoute = $this->documentModel->getLatestRouteForDepartment($documentId, $deptId);
@@ -1724,6 +1967,10 @@ class Documents extends Controller
             $internalAssignment = $this->documentModel->getCurrentInternalAssignment($documentId, $deptId);
             $canDelegateInternally = $this->canCurrentManagerDelegateInternally($documentId, $deptId)
                 && ($document['status'] ?? '') !== 'Returned';
+            $canManagerResolveDivisionDocument = $this->canCurrentManagerResolveDivisionDocument($documentId, $deptId)
+                && !$managerCompleted;
+            $canManagerReturnDocument = $canManagerResolveDivisionDocument;
+            $canManagerCompleteDocument = $canManagerResolveDivisionDocument;
             $divisionStaff = $canDelegateInternally
                 ? $this->documentModel->getActiveStaffByDepartment($deptId)
                 : [];

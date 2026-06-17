@@ -695,6 +695,7 @@ class Document
             $routing[$row['routing_type']][] = [
                 'department_id' => (int) $row['department_id'],
                 'division_name' => $row['division_name'],
+                'status' => $row['status'],
                 'is_cleared' => $row['status'] === 'Received'
             ];
         }
@@ -1104,6 +1105,217 @@ class Document
                 'action_by' => $userId,
                 'department_id' => $departmentId
             ]);
+
+            $this->db->commit();
+            return true;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function receiveDocumentByManager($id, $userId, $departmentId, $addLog = true)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $route = $this->getDepartmentRouteRole($id, $departmentId);
+
+            if ($route && in_array($route['route_type'], ['TO', 'DELEGATE'], true) && (int) $route['is_cleared'] !== 1) {
+                if ($route['route_type'] !== 'THRU' && !$this->isThruCleared($id)) {
+                    throw new Exception('Document is waiting for THRU clearance.');
+                }
+
+                $updateRoute = $this->db->prepare("
+                    UPDATE document_routes
+                    SET status = 'Received',
+                        received_at = NOW()
+                    WHERE document_id = :document_id
+                    AND to_department_id = :department_id
+                    AND routing_type = :routing_type
+                    AND status = 'Pending'
+                ");
+
+                $updateRoute->execute([
+                    'document_id' => $id,
+                    'department_id' => $departmentId,
+                    'routing_type' => $route['route_type']
+                ]);
+
+                $allPrimaryRoutesReceived = ($route['route_type'] === 'TO' && $this->areAllToReceived($id))
+                    || ($route['route_type'] === 'DELEGATE' && !$this->hasToRoute($id) && $this->areAllDelegateReceived($id));
+
+                if ($allPrimaryRoutesReceived) {
+                    $markDoc = $this->db->prepare("
+                        UPDATE documents
+                        SET status = 'Received',
+                            received_by = :user_id,
+                            received_at = NOW()
+                        WHERE id = :id
+                    ");
+
+                    $markDoc->execute([
+                        'id' => $id,
+                        'user_id' => $userId
+                    ]);
+                }
+            } elseif (!$route) {
+                $stmt = $this->db->prepare("
+                    UPDATE documents
+                    SET status = 'Received',
+                        received_by = :user_id,
+                        received_at = NOW()
+                    WHERE id = :id
+                ");
+
+                $stmt->execute([
+                    'id' => $id,
+                    'user_id' => $userId
+                ]);
+            }
+
+            if ($addLog) {
+                $this->addDocumentLog(
+                    $id,
+                    'Manager Received',
+                    $userId,
+                    $departmentId,
+                    'Document received by manager'
+                );
+            }
+
+            $this->db->commit();
+            return true;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function returnDocumentByManager($id, $userId, $departmentId, $remarks)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $document = $this->findById($id);
+            if (!$document) {
+                throw new Exception('Document not found.');
+            }
+
+            if (($document['status'] ?? '') === 'Returned') {
+                throw new Exception('Document has already been returned.');
+            }
+
+            $route = $this->getLatestRouteRecordForDepartment($id, $departmentId);
+            $routeId = $route ? (int) $route['id'] : null;
+            $releasingDepartmentId = $route ? (int) $route['from_department_id'] : (int) $document['origin_department_id'];
+
+            $updateDocument = $this->db->prepare("
+                UPDATE documents
+                SET status = 'Returned'
+                WHERE id = :id
+            ");
+            $updateDocument->execute(['id' => $id]);
+
+            if ($routeId !== null) {
+                $updateRoute = $this->db->prepare("
+                    UPDATE document_routes
+                    SET status = 'Returned'
+                    WHERE id = :id
+                ");
+                $updateRoute->execute(['id' => $routeId]);
+            }
+
+            $insertReturn = $this->db->prepare("
+                INSERT INTO document_returns (
+                    document_id,
+                    route_id,
+                    returned_by,
+                    returned_department_id,
+                    releasing_department_id,
+                    return_reason,
+                    attachment_issue,
+                    remarks
+                ) VALUES (
+                    :document_id,
+                    :route_id,
+                    :returned_by,
+                    :returned_department_id,
+                    :releasing_department_id,
+                    :return_reason,
+                    NULL,
+                    :remarks
+                )
+            ");
+
+            $insertReturn->execute([
+                'document_id' => $id,
+                'route_id' => $routeId,
+                'returned_by' => $userId,
+                'returned_department_id' => $departmentId,
+                'releasing_department_id' => $releasingDepartmentId,
+                'return_reason' => 'Returned by manager',
+                'remarks' => trim((string) $remarks)
+            ]);
+
+            $returnId = (int) $this->db->lastInsertId();
+
+            $this->addDocumentLog(
+                $id,
+                'Manager Returned',
+                $userId,
+                $departmentId,
+                trim((string) $remarks)
+            );
+
+            $this->db->commit();
+            return $returnId;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function completeDocumentByManager($id, $userId, $departmentId, $remarks)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $document = $this->findById($id);
+            if (!$document) {
+                throw new Exception('Document not found.');
+            }
+
+            if (($document['status'] ?? '') === 'Returned') {
+                throw new Exception('Returned documents cannot be marked completed.');
+            }
+
+            $stmt = $this->db->prepare("
+                UPDATE documents
+                SET status = CASE WHEN status = 'Draft' THEN status ELSE 'Received' END,
+                    received_by = COALESCE(received_by, :user_id),
+                    received_at = COALESCE(received_at, NOW())
+                WHERE id = :id
+            ");
+
+            $stmt->execute([
+                'id' => $id,
+                'user_id' => $userId
+            ]);
+
+            $this->addDocumentLog(
+                $id,
+                'Manager Completed',
+                $userId,
+                $departmentId,
+                trim((string) $remarks)
+            );
 
             $this->db->commit();
             return true;
@@ -2000,6 +2212,26 @@ class Document
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    public function getActiveManagersByDepartment($department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                id,
+                firstname,
+                middle_initial,
+                lastname,
+                email
+            FROM users
+            WHERE department_id = :department_id
+            AND role = 'manager'
+            AND status = 'active'
+            ORDER BY lastname ASC, firstname ASC
+        ");
+
+        $stmt->execute(['department_id' => (int) $department_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function findActiveStaffInDepartment($user_id, $department_id)
     {
         $stmt = $this->db->prepare("
@@ -2013,6 +2245,32 @@ class Document
             WHERE id = :user_id
             AND department_id = :department_id
             AND role = 'staff'
+            AND status = 'active'
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'user_id' => (int) $user_id,
+            'department_id' => (int) $department_id
+        ]);
+
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $user ?: null;
+    }
+
+    public function findActiveManagerInDepartment($user_id, $department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                id,
+                firstname,
+                middle_initial,
+                lastname,
+                email
+            FROM users
+            WHERE id = :user_id
+            AND department_id = :department_id
+            AND role = 'manager'
             AND status = 'active'
             LIMIT 1
         ");

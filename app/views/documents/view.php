@@ -160,7 +160,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                     </form>
                 <?php endif; ?>
 
-                <?php if (!$isManager && empty($internalAssignment) && in_array($document['status'], $receivableStatuses, true) && (($routeType && !$routeCleared && ($routeType === 'THRU' || $thruCleared)) || (!$routeType && $document['destination_department_id'] == $_SESSION['department_id']))): ?>
+                <?php if (!$isManager && empty($internalAssignment) && empty($isDivisionManagerRouteForStaff) && in_array($document['status'], $receivableStatuses, true) && (($routeType && !$routeCleared && ($routeType === 'THRU' || $thruCleared)) || (!$routeType && $document['destination_department_id'] == $_SESSION['department_id']))): ?>
                     <form action="<?php echo URLROOT; ?>/documents/receive/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
                         <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Receive this document?');">Receive Document</button>
@@ -219,7 +219,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                     <?php endif; ?>
                 <?php endif; ?>
 
-                <?php if ($isManager && $managerStaffHandled && !$managerAcknowledged): ?>
+                <?php if ($isManager && $managerStaffHandled && ($document['status'] ?? '') !== 'Returned' && (!$managerAcknowledged || (in_array($routeType, ['TO', 'DELEGATE'], true) && !$routeCleared))): ?>
                     <form action="<?php echo URLROOT; ?>/documents/managerReceive/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
                         <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Receive this document as manager?');">Manager Receive</button>
@@ -264,6 +264,30 @@ $renderTimelineRemarks = function ($log) use ($document) {
                     </form>
                 <?php endif; ?>
 
+                <?php if (!empty($canManagerReturnDocument)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/managerReturnDocument/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#fff7ed; border:1px solid #fed7aa; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Return Document</div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="manager_return_remarks">Remarks</label>
+                            <textarea id="manager_return_remarks" name="manager_return_remarks" class="form-control" rows="3" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Return this document with remarks?');">Return with Remarks</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canManagerCompleteDocument)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/managerCompleteDocument/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Complete Document</div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="manager_completion_remarks">Remarks</label>
+                            <textarea id="manager_completion_remarks" name="manager_completion_remarks" class="form-control" rows="3" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100" onclick="return confirm('Mark this document completed?');">Mark Complete</button>
+                    </form>
+                <?php endif; ?>
+
                 <?php if (!empty($canReceiveInternalAssignment)): ?>
                     <form action="<?php echo URLROOT; ?>/documents/receiveInternalAssignment/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
@@ -277,7 +301,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                         <div class="fw-bold mb-3">Complete Internal Assignment</div>
                         <div class="mb-2">
                             <label class="form-label small fw-semibold" for="completion_attachment">Completion attachment</label>
-                            <input type="file" id="completion_attachment" name="completion_attachment" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp" required>
+                            <input type="file" id="completion_attachment" name="completion_attachment" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp">
                             <div class="form-text">Maximum size: <?php echo (int) MAX_ATTACHMENT_SIZE_MB; ?> MB.</div>
                         </div>
                         <div class="mb-3">
@@ -328,7 +352,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                                 <?php foreach ($routing[$routingKey] as $route): ?>
                                     <div class="app-card p-3" style="background:#f8fafc; box-shadow:none;">
                                         <div class="fw-semibold"><?php echo htmlspecialchars($route['division_name']); ?></div>
-                                        <div class="small text-muted mt-1"><?php if ($routingKey === 'THRU') { echo $route['is_cleared'] ? 'Cleared' : 'Pending'; } elseif ($routingKey === 'CC') { echo $route['is_cleared'] ? 'Noted' : 'Pending'; } else { echo $route['is_cleared'] ? 'Received' : 'Pending'; } ?></div>
+                                        <div class="small text-muted mt-1"><?php if (($route['status'] ?? '') === 'Returned') { echo 'Returned'; } elseif ($routingKey === 'THRU') { echo $route['is_cleared'] ? 'Cleared' : 'Pending'; } elseif ($routingKey === 'CC') { echo $route['is_cleared'] ? 'Noted' : 'Pending'; } else { echo $route['is_cleared'] ? 'Received' : 'Pending'; } ?></div>
                                     </div>
                                 <?php endforeach; ?>
                             </div>

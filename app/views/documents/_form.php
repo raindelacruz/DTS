@@ -4,8 +4,10 @@ $selectedThruDepartmentId = isset($selectedThruDepartmentId) ? (int) $selectedTh
 $selectedToDepartmentIds = array_map('intval', $selectedToDepartmentIds ?? []);
 $selectedCcDepartmentIds = array_map('intval', $selectedCcDepartmentIds ?? []);
 $selectedDelegateDepartmentIds = array_map('intval', $selectedDelegateDepartmentIds ?? []);
+$selectedManagerIds = array_map('intval', $selectedManagerIds ?? []);
 $selectedStaffIds = array_map('intval', $selectedStaffIds ?? []);
 $isDivisionManager = $isDivisionManager ?? false;
+$isDivisionStaff = $isDivisionStaff ?? false;
 $submitLabel = $submitLabel ?? 'Save Document';
 $formAction = $formAction ?? '';
 $cancelUrl = $cancelUrl ?? (URLROOT . '/documents');
@@ -167,7 +169,46 @@ $formMessage = $formMessage ?? '';
             </div>
             <div class="form-text">Use CC for offices that only need a copy or visibility.</div>
         </div>
-        <?php if (!$isDivisionManager): ?>
+        <?php if ($isDivisionStaff): ?>
+            <div class="col-lg-4">
+                <label class="form-label fw-semibold">Division Managers</label>
+                <div class="route-search-wrap">
+                    <input
+                        type="search"
+                        class="form-control route-search-input"
+                        placeholder="Search division managers"
+                        aria-label="Search division managers"
+                        data-route-search-target="division-manager-list"
+                    >
+                </div>
+                <div class="route-checkbox-group" id="division-manager-list" role="group" aria-label="Division Managers">
+                    <?php if (!empty($divisionManagers)): ?>
+                        <?php foreach ($divisionManagers as $manager): ?>
+                            <?php
+                                $managerId = (int) $manager['id'];
+                                $managerName = trim(($manager['firstname'] ?? '') . ' ' . (!empty($manager['middle_initial']) ? $manager['middle_initial'] . '. ' : '') . ($manager['lastname'] ?? ''));
+                            ?>
+                            <label class="route-checkbox-item" for="manager_recipient_<?php echo $managerId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($managerName), ENT_QUOTES, 'UTF-8'); ?>">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    id="manager_recipient_<?php echo $managerId; ?>"
+                                    name="manager_recipient_ids[]"
+                                    value="<?php echo $managerId; ?>"
+                                    <?php echo in_array($managerId, $selectedManagerIds, true) ? 'checked' : ''; ?>
+                                >
+                                <span><?php echo htmlspecialchars($managerName); ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="text-muted small">No active managers are assigned to your division.</div>
+                    <?php endif; ?>
+                    <div class="route-empty-state d-none" data-route-empty>No managers match your search.</div>
+                </div>
+                <div class="form-text">Select one or more managers in your division for release.</div>
+                <?php if (!empty($errors['manager_recipient_ids'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($errors['manager_recipient_ids']); ?></div><?php endif; ?>
+            </div>
+        <?php elseif (!$isDivisionManager): ?>
             <div class="col-lg-4">
                 <label class="form-label fw-semibold">Own Division</label>
                 <div class="route-search-wrap">
