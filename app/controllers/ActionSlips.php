@@ -557,16 +557,18 @@ class ActionSlips extends Controller
         $currentDepartmentId = (int) ($slip['current_department_id'] ?: $slip['receiving_department_id']);
         $currentDivisionId = (int) ($slip['current_division_id'] ?? 0);
         $assignedStaffId = (int) ($slip['assigned_staff_id'] ?? 0);
+        $receivingLevel = $slip['receiving_level'] ?? '';
         $isDepartmentManager = $this->isManager() && $this->isParentDepartment($deptId) && $currentDepartmentId === $deptId;
         $isDivisionManager = $this->isManager() && !$this->isParentDepartment($deptId) && $currentDivisionId === $deptId;
         $isAssignedStaff = $assignedStaffId === $this->currentUserId();
+        $isDepartmentLevelSlip = $receivingLevel === 'Department' && $currentDivisionId === 0 && $assignedStaffId === 0;
         $wasCompletedByStaff = $status === DepartmentActionSlip::STATUS_COMPLETED
             && $assignedStaffId > 0
             && (int) ($slip['completed_by'] ?? 0) === $assignedStaffId;
         $isReturnedToStaff = $status === DepartmentActionSlip::STATUS_RETURNED && $assignedStaffId > 0;
 
         return [
-            'receive_department' => $isDepartmentManager && $currentDivisionId === 0 && $status === DepartmentActionSlip::STATUS_RELEASED,
+            'receive_department' => $isDepartmentManager && $isDepartmentLevelSlip && $status === DepartmentActionSlip::STATUS_RELEASED,
             'finalize_draft' => $status === DepartmentActionSlip::STATUS_DRAFT && ($currentDivisionId > 0 ? $isDivisionManager : $isDepartmentManager),
             'route_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'delegate_division' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
