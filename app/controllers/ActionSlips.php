@@ -110,12 +110,32 @@ class ActionSlips extends Controller
 
     private function getVisibleStaff()
     {
+        $currentDepartment = $this->departmentModel->getDepartmentById($this->currentDepartmentId());
+        if (!$currentDepartment && !$this->isAdmin()) {
+            return [];
+        }
+
+        if ($this->isAdmin()) {
+            $departments = $this->departmentModel->getAll();
+        } elseif (!empty($currentDepartment['parent_id'])) {
+            // Division users can only filter by staff assigned to their division.
+            $departments = [$currentDepartment];
+        } else {
+            // Parent-department users can filter by staff in the department itself
+            // and in each division under it.
+            $departments = array_merge(
+                [$currentDepartment],
+                $this->departmentModel->getChildDepartmentsForParent($this->currentDepartmentId())
+            );
+        }
+
         $staff = [];
-        foreach ($this->getAllDivisions() as $division) {
-            foreach ($this->slipModel->getActiveStaffByDepartment((int) $division['id']) as $user) {
-                $staff[] = $user + ['department_name' => $division['division_name'] ?? ''];
+        foreach ($departments as $department) {
+            foreach ($this->slipModel->getActiveStaffByDepartment((int) $department['id']) as $user) {
+                $staff[] = $user + ['department_name' => $department['division_name'] ?? ''];
             }
         }
+
         return $staff;
     }
 

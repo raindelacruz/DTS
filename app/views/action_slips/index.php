@@ -20,18 +20,32 @@ $statusClasses = [
     .das-title { font-weight: 700; color: #0f172a; }
     .das-meta { color: #64748b; font-size: 0.84rem; }
     .status-pill { border-radius: 999px; font-size: 0.74rem; font-weight: 800; padding: 0.34rem 0.62rem; display: inline-block; white-space: nowrap; }
-    .das-filter-card { padding: 1rem !important; overflow-x: auto; }
+    .das-filter-card { padding: 1rem !important; overflow: hidden; }
     .das-filter-form {
         display: grid;
-        grid-template-columns: minmax(220px, 1.25fr) repeat(4, minmax(150px, 1fr)) 86px 96px;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
         gap: 0.75rem;
         align-items: end;
-        min-width: 1060px;
+        width: 100%;
     }
     .das-filter-form > * { min-width: 0; }
     .das-filter-form .form-label { white-space: nowrap; }
     .das-filter-actions { display: grid; }
     .das-filter-form .btn { min-height: 46px; }
+
+    @media (max-width: 575.98px) {
+        .das-filter-card { padding: 0.75rem !important; }
+        .das-filter-form {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem 0.625rem;
+        }
+        .das-filter-form > div:first-child,
+        .das-filter-form > div:nth-child(3),
+        .das-filter-form > div:nth-child(4),
+        .das-filter-form > div:nth-child(5) {
+            grid-column: 1 / -1;
+        }
+    }
 </style>
 
 <div class="page-hero compact">

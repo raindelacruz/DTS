@@ -581,6 +581,10 @@
                     <span>My Profile</span>
                 </a>
                 <?php if (($_SESSION['role'] ?? '') === 'admin'): ?>
+                    <a class="sidebar-link <?php echo $currentSection === 'departments' ? 'active' : ''; ?>" href="<?php echo URLROOT; ?>/departments">
+                        <span class="sidebar-icon">D</span>
+                        <span>Department Management</span>
+                    </a>
                     <a class="sidebar-link <?php echo $currentSection === 'users' && $currentUrl === 'users' ? 'active' : ''; ?>" href="<?php echo URLROOT; ?>/users">
                         <span class="sidebar-icon">U</span>
                         <span>User Management</span>

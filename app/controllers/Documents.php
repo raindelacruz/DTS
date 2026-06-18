@@ -1366,12 +1366,11 @@ class Documents extends Controller
                 $deptId
             );
 
-            $this->notificationModel->notifyDepartmentStaffUsers(
-                [(int) $openReturn['returned_department_id']],
+            $this->notifyDocumentRouteDepartments(
+                $documentId,
                 'Document re-released',
                 $document['prefix'] . ' was re-released with a corrected attachment.',
-                '/documents/show/' . $documentId,
-                (int) $_SESSION['user_id']
+                [(int) $openReturn['returned_department_id']]
             );
 
             flash('success', 'Document re-released successfully.', 'success');
