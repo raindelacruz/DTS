@@ -11,7 +11,7 @@ class Database {
     private $stmt;
 
     public function __construct() {
-        $dsn = 'mysql:host=' . $this->host . ';dbname=' . $this->dbname;
+        $dsn = 'mysql:host=' . $this->host . ';dbname=' . $this->dbname . ';charset=utf8mb4';
         $options = [
             PDO::ATTR_PERSISTENT => true,
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
@@ -53,5 +53,21 @@ class Database {
 
     public function lastInsertId() {
         return $this->dbh->lastInsertId();
+    }
+
+    public function beginTransaction() {
+        return $this->dbh->beginTransaction();
+    }
+
+    public function commit() {
+        return $this->dbh->commit();
+    }
+
+    public function rollBack() {
+        return $this->dbh->rollBack();
+    }
+
+    public function inTransaction() {
+        return $this->dbh->inTransaction();
     }
 }

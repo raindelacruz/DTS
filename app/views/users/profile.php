@@ -6,7 +6,7 @@
 
 <div class="instruction-card">
     <h3>Quick Guide</h3>
-    <p>Use this page to keep your <strong>department</strong>, <strong>email address</strong>, and <strong>password</strong> current. Other account details are read-only so records stay consistent across the tracking system.</p>
+    <p>Use this page to keep your <strong>email address</strong> and <strong>password</strong> current. Department assignments are managed by administrators so document access remains controlled.</p>
 </div>
 
 <?php if (!empty($data['success'])): ?><div class="alert alert-success app-card border-0 mb-4"><?php echo htmlspecialchars($data['success']); ?></div><?php endif; ?>
@@ -32,13 +32,8 @@
                 <div class="row g-4">
                     <div class="col-md-6">
                         <label class="form-label fw-semibold">Department</label>
-                        <select name="department_id" class="form-select <?php echo !empty($data['errors']['department_id']) ? 'is-invalid' : ''; ?>" required>
-                            <option value="">Select department</option>
-                            <?php foreach (($data['departments'] ?? []) as $department): ?>
-                                <option value="<?php echo $department['id']; ?>" <?php echo ((int) ($data['values']['department_id'] ?? 0) === (int) $department['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($department['division_name']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <?php if (!empty($data['errors']['department_id'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($data['errors']['department_id']); ?></div><?php endif; ?>
+                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($data['user']->department_name ?? ''); ?>" disabled>
+                        <div class="form-text">Contact an administrator to request a department transfer.</div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label fw-semibold">Email Address</label>
@@ -74,12 +69,12 @@
                     </div>
                     <div class="col-md-4">
                         <label class="form-label fw-semibold">New Password</label>
-                        <input type="password" name="new_password" class="form-control <?php echo !empty($data['password_errors']['new_password']) ? 'is-invalid' : ''; ?>" minlength="6" required>
+                        <input type="password" name="new_password" class="form-control <?php echo !empty($data['password_errors']['new_password']) ? 'is-invalid' : ''; ?>" minlength="<?php echo PASSWORD_MIN_LENGTH; ?>" required>
                         <?php if (!empty($data['password_errors']['new_password'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($data['password_errors']['new_password']); ?></div><?php endif; ?>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label fw-semibold">Confirm Password</label>
-                        <input type="password" name="confirm_password" class="form-control <?php echo !empty($data['password_errors']['confirm_password']) ? 'is-invalid' : ''; ?>" minlength="6" required>
+                        <input type="password" name="confirm_password" class="form-control <?php echo !empty($data['password_errors']['confirm_password']) ? 'is-invalid' : ''; ?>" minlength="<?php echo PASSWORD_MIN_LENGTH; ?>" required>
                         <?php if (!empty($data['password_errors']['confirm_password'])): ?><div class="invalid-feedback d-block"><?php echo htmlspecialchars($data['password_errors']['confirm_password']); ?></div><?php endif; ?>
                     </div>
                 </div>

@@ -76,6 +76,7 @@ $filters = $data['filters'] ?? [];
             </tbody>
         </table>
     </div>
+    <?php renderServerPagination($data['pagination'] ?? null); ?>
 </div>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

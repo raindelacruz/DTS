@@ -1,0 +1,6 @@
+Options -Indexes
+RewriteEngine On
+RewriteRule ^(?:app|storage|database|docs|helpers|config|core)(?:/|$) - [R=404,L,NC]
+<FilesMatch "(?i)\.(?:sql|log|ini|env|md|lock)$">
+    Require all denied
+</FilesMatch>

@@ -45,6 +45,10 @@ class Verification extends Controller
 
     public function verify($qrToken = '')
     {
+        if (!empty($_SESSION['user_id'])) {
+            refreshAuthenticatedSession();
+        }
+
         $qrToken = trim((string) $qrToken);
         $isTokenFormatValid = (bool) preg_match('/^[a-f0-9]{32,64}$/', $qrToken);
         $document = $isTokenFormatValid ? $this->documentModel->findByQrToken($qrToken) : null;

@@ -1,21 +1,31 @@
 <?php
 
+require_once dirname(__DIR__) . '/app/init.php';
+
+header_remove('X-Powered-By');
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: no-referrer');
+header('Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+header('Cross-Origin-Opener-Policy: same-origin');
+if (isSecureRequest()) {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
+
 session_name('DTSSESSID');
+$sessionCookiePath = parse_url(URLROOT, PHP_URL_PATH) ?: '/';
 session_set_cookie_params([
     'lifetime' => 0,
-    'path' => '/',
+    'path' => rtrim($sessionCookiePath, '/') . '/',
     'domain' => '',
-    'secure' => (
-        (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (isset($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443')
-        || strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'
-    ),
+    'secure' => isSecureRequest(),
     'httponly' => true,
     'samesite' => 'Lax'
 ]);
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
 session_start();
-
-require_once dirname(__DIR__) . '/app/init.php';
 
 try {
     $app = new App();

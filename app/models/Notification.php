@@ -13,7 +13,6 @@ class Notification
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
         );
 
-        $this->ensureTable();
     }
 
     private function ensureTable()

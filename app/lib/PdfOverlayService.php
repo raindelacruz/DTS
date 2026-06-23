@@ -1,7 +1,8 @@
 <?php
 
-require_once __DIR__ . '/fpdi/autoload.php';
-require_once __DIR__ . '/tcpdf-full/tcpdf.php';
+if (!class_exists('setasign\\Fpdi\\Tcpdf\\Fpdi') || !class_exists('TCPDF')) {
+    throw new RuntimeException('Managed PDF dependencies are not installed. Run composer install.');
+}
 
 if (!class_exists('pdf', false) && class_exists('TCPDF', false)) {
     class_alias('TCPDF', 'pdf');

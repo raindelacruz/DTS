@@ -105,4 +105,6 @@ $filters = $data['filters'] ?? [];
     </div>
 </div>
 
+<?php renderServerPagination($data['pagination'] ?? null); ?>
+
 <?php require_once '../app/views/layout/footer.php'; ?>

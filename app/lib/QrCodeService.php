@@ -1,6 +1,8 @@
 <?php
 
-require_once __DIR__ . '/tcpdf/tcpdf_barcodes_2d.php';
+if (!class_exists('TCPDF2DBarcode')) {
+    throw new RuntimeException('Managed PDF dependencies are not installed. Run composer install.');
+}
 
 class QrCodeService
 {

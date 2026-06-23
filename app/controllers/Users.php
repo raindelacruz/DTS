@@ -45,11 +45,17 @@ class Users extends Controller
                 $filters['department_id'] = 0;
             }
 
+            $pagination = paginationRequest();
+            $totalUsers = $this->userModel->countSearchWithDepartments($filters);
+            $filters['_limit'] = $pagination['per_page'];
+            $filters['_offset'] = $pagination['offset'];
+
             $data = [
                 'users' => $this->userModel->searchWithDepartments($filters),
                 'departments' => $this->departmentModel->getAll(),
                 'roles' => User::roles(),
                 'filters' => $filters,
+                'pagination' => paginationMeta($totalUsers, $pagination['page'], $pagination['per_page']),
                 'success' => pullFlash('users_success')['message'] ?? '',
                 'error' => pullFlash('users_error')['message'] ?? ''
             ];
@@ -106,14 +112,12 @@ class Users extends Controller
             }
 
             $state = pullFormState('user_profile', [
-                'department_id' => (string) ($user->department_id ?? ''),
                 'email' => (string) ($user->email ?? '')
             ]);
             $passwordState = pullFormState('user_password', []);
 
             $data = [
                 'user' => $user,
-                'departments' => $this->departmentModel->getAll(),
                 'success' => pullFlash('profile_success')['message'] ?? '',
                 'error' => pullFlash('profile_error')['message'] ?? '',
                 'values' => $state['values'],
@@ -137,7 +141,6 @@ class Users extends Controller
     public function updateProfile()
     {
         $values = [
-            'department_id' => (string) ((int) ($_POST['department_id'] ?? 0)),
             'email' => strtolower(trim($_POST['email'] ?? ''))
         ];
 
@@ -146,10 +149,6 @@ class Users extends Controller
             validateCsrfOrFail();
 
             $errors = [];
-
-            if ((int) $values['department_id'] <= 0) {
-                $errors['department_id'] = 'Please select a department.';
-            }
 
             if ($values['email'] === '' || !filter_var($values['email'], FILTER_VALIDATE_EMAIL)) {
                 $errors['email'] = 'Please provide a valid email address.';
@@ -163,9 +162,9 @@ class Users extends Controller
                 throw new ValidationException('Please correct the highlighted fields.', $errors);
             }
 
-            $this->userModel->updateProfile((int) $_SESSION['user_id'], (int) $values['department_id'], $values['email']);
-            $_SESSION['department_id'] = (int) $values['department_id'];
+            $this->userModel->updateProfile((int) $_SESSION['user_id'], $values['email']);
             $_SESSION['email'] = $values['email'];
+            securityAudit('profile_email_changed', (int) $_SESSION['user_id'], (int) $_SESSION['user_id']);
 
             flash('profile_success', 'Profile updated successfully.', 'success');
             redirect('/users/profile', 303);
@@ -194,8 +193,9 @@ class Users extends Controller
                 $errors['current_password'] = 'Current password is required.';
             }
 
-            if (strlen($newPassword) < 6) {
-                $errors['new_password'] = 'New password must be at least 6 characters.';
+            $policyErrors = validatePasswordPolicy($newPassword);
+            if (!empty($policyErrors)) {
+                $errors['new_password'] = $policyErrors[0];
             }
 
             if ($confirmPassword === '') {
@@ -218,6 +218,8 @@ class Users extends Controller
             }
 
             $this->userModel->updatePassword((int) $_SESSION['user_id'], $newPassword);
+            $_SESSION['session_version'] = $this->userModel->currentSessionVersion((int) $_SESSION['user_id']);
+            securityAudit('password_changed', (int) $_SESSION['user_id'], (int) $_SESSION['user_id']);
 
             flash('profile_success', 'Password updated successfully.', 'success');
             redirect('/users/profile', 303);
@@ -270,6 +272,7 @@ class Users extends Controller
             }
 
             $this->userModel->updateRole((int) $id, $role);
+            securityAudit('user_role_changed', (int) $_SESSION['user_id'], (int) $id, ['from' => $user->role, 'to' => $role]);
 
             $this->notificationModel->create(
                 (int) $user->id,
@@ -318,6 +321,7 @@ class Users extends Controller
             }
 
             $this->userModel->updateDepartment((int) $id, $departmentId);
+            securityAudit('user_department_changed', (int) $_SESSION['user_id'], (int) $id, ['from' => (int) $user->department_id, 'to' => $departmentId]);
 
             if ((int) $user->id === (int) $_SESSION['user_id']) {
                 $_SESSION['department_id'] = $departmentId;
@@ -362,8 +366,9 @@ class Users extends Controller
                 throw new ValidationException('User not found.');
             }
 
-            if (strlen($newPassword) < 6) {
-                throw new ValidationException('New password must be at least 6 characters.');
+            $policyErrors = validatePasswordPolicy($newPassword);
+            if (!empty($policyErrors)) {
+                throw new ValidationException($policyErrors[0]);
             }
 
             if ($confirmPassword === '' || $newPassword !== $confirmPassword) {
@@ -371,6 +376,7 @@ class Users extends Controller
             }
 
             $this->userModel->updatePassword((int) $id, $newPassword);
+            securityAudit('administrator_password_reset', (int) $_SESSION['user_id'], (int) $id);
 
             $this->notificationModel->create(
                 (int) $user->id,
@@ -406,6 +412,30 @@ class Users extends Controller
         $this->setStatus($id, $status);
     }
 
+    public function resetMfa($id)
+    {
+        $redirectPath = '/users/show/' . (int) $id;
+        try {
+            $this->requireAdmin();
+            requirePost();
+            validateCsrfOrFail();
+            $user = $this->userModel->findById((int) $id);
+            if (!$user || ($user->role ?? '') !== 'admin') {
+                throw new ValidationException('MFA reset is available only for administrator accounts.');
+            }
+            if ((int) $user->id === (int) $_SESSION['user_id']) {
+                throw new ValidationException('Another administrator must perform your MFA recovery.');
+            }
+            $this->userModel->disableMfa((int) $id);
+            securityAudit('mfa_reset_by_administrator', (int) $_SESSION['user_id'], (int) $id);
+            flash('users_success', 'MFA was reset. The administrator must enroll again at next login.', 'success');
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'users.resetMfa', 'target_user_id' => (int) $id]);
+            flash('users_error', $e instanceof ValidationException ? $e->getMessage() : 'MFA could not be reset.', 'error');
+        }
+        redirect($redirectPath, 303);
+    }
+
     private function setStatus($id, $status)
     {
         $redirectPath = '/users/show/' . (int) $id;
@@ -425,6 +455,7 @@ class Users extends Controller
             }
 
             $this->userModel->updateStatus((int) $id, $status);
+            securityAudit('user_status_changed', (int) $_SESSION['user_id'], (int) $id, ['from' => $user->status, 'to' => $status]);
 
             if ($status === 'active') {
                 $this->notificationModel->create(

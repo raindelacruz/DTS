@@ -43,7 +43,7 @@ $fieldClass = function ($errors, $field) { return isset($errors[$field]) ? ' is-
         <span class="badge-soft"><?php echo count($data['divisions']); ?> division(s)</span>
     </div>
     <div class="table-responsive">
-        <table class="table table-modern align-middle mb-0">
+        <table class="table table-modern align-middle mb-0" data-client-pagination="true">
             <thead><tr><th>Division</th><th>Code</th><th>Email</th><th class="text-end">Action</th></tr></thead>
             <tbody>
             <?php if ($data['divisions']): foreach ($data['divisions'] as $division): ?>

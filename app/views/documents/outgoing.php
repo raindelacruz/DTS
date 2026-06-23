@@ -6,6 +6,7 @@ $statusClasses = [
     'Released' => 'background:#fef3c7; color:#92400e;',
     'Received' => 'background:#dcfce7; color:#166534;',
     'Returned' => 'background:#fee2e2; color:#991b1b;',
+    'Cancelled' => 'background:#fee2e2; color:#991b1b;',
     'Re-released' => 'background:#dbeafe; color:#1e40af;'
 ];
 $filters = $data['filters'] ?? [];
@@ -30,7 +31,7 @@ $filters = $data['filters'] ?? [];
             <label class="form-label fw-semibold">Status</label>
             <select name="status" class="form-select">
                 <option value="">All Status</option>
-                <?php foreach (['Draft', 'Released', 'Re-released', 'Received', 'Returned'] as $status): ?>
+                <?php foreach (['Draft', 'Released', 'Re-released', 'Received', 'Returned', 'Cancelled'] as $status): ?>
                     <option value="<?php echo $status; ?>" <?php echo (($filters['status'] ?? '') === $status) ? 'selected' : ''; ?>><?php echo $status; ?></option>
                 <?php endforeach; ?>
             </select>
@@ -104,5 +105,7 @@ $filters = $data['filters'] ?? [];
         </table>
     </div>
 </div>
+
+<?php renderServerPagination($data['pagination'] ?? null); ?>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

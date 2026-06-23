@@ -242,7 +242,7 @@
         </form>
 
         <div class="auth-link">
-            <a href="<?php echo URLROOT; ?>/auth/register">Register</a>
+            <a href="<?php echo URLROOT; ?>/auth/register">Register</a> · <a href="<?php echo URLROOT; ?>/auth/forgotPassword">Forgot password?</a>
         </div>
     </div>
     <script>

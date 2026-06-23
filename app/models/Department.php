@@ -112,6 +112,35 @@ class Department
         return (int) $stmt->fetchColumn() > 0;
     }
 
+    public function parentDepartmentNameExists($departmentName, $excludeId = null)
+    {
+        $sql = "SELECT COUNT(*) FROM departments
+                WHERE parent_id IS NULL AND LOWER(department_name) = LOWER(:department_name)";
+        $params = ['department_name' => $departmentName];
+        if ($excludeId !== null) {
+            $sql .= " AND id <> :exclude_id";
+            $params['exclude_id'] = (int) $excludeId;
+        }
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function createParent($departmentName, $divisionName, $code, $email)
+    {
+        $stmt = $this->db->prepare("
+            INSERT INTO departments (parent_id, department_name, division_name, code, email)
+            VALUES (NULL, :department_name, :division_name, :code, :email)
+        ");
+        $stmt->execute([
+            'department_name' => $departmentName,
+            'division_name' => $divisionName,
+            'code' => $code,
+            'email' => $email
+        ]);
+        return (int) $this->db->lastInsertId();
+    }
+
     public function updateParent($id, $departmentName, $divisionName, $code, $email)
     {
         $this->db->beginTransaction();

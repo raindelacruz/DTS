@@ -22,6 +22,41 @@ class Departments extends Controller
         ]);
     }
 
+    public function create()
+    {
+        $this->view('departments/create', [
+            'department_form' => pullFormState('department_create', [
+                'department_name' => '', 'division_name' => '', 'code' => '', 'email' => ''
+            ])
+        ]);
+    }
+
+    public function store()
+    {
+        $values = $this->values(true);
+        try {
+            requirePost();
+            validateCsrfOrFail();
+            $this->validate($values);
+            if ($this->departmentModel->parentDepartmentNameExists($values['department_name'])) {
+                throw new ValidationException('Please correct the highlighted fields.', [
+                    'department_name' => 'That department already exists.'
+                ]);
+            }
+            $id = $this->departmentModel->createParent(
+                $values['department_name'], $values['division_name'], $values['code'], $values['email']
+            );
+            flash('departments_success', 'Department added successfully.', 'success');
+            redirect('/departments/show/' . $id, 303);
+        } catch (ValidationException $e) {
+            storeFormState('department_create', $values, $e->getErrors(), $e->getMessage());
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'departments.store']);
+            flash('departments_error', 'The department could not be added.', 'error');
+        }
+        redirect('/departments/create', 303);
+    }
+
     public function show($id)
     {
         $id = (int) $id;
@@ -136,8 +171,14 @@ class Departments extends Controller
         $errors = [];
         if (array_key_exists('department_name', $values) && $values['department_name'] === '') {
             $errors['department_name'] = 'Department name is required.';
+        } elseif (array_key_exists('department_name', $values) && strlen($values['department_name']) > 150) {
+            $errors['department_name'] = 'Department name must not exceed 150 characters.';
         }
-        if ($values['division_name'] === '') $errors['division_name'] = 'Office or division name is required.';
+        if ($values['division_name'] === '') {
+            $errors['division_name'] = 'Office or division name is required.';
+        } elseif (strlen($values['division_name']) > 150) {
+            $errors['division_name'] = 'Office or division name must not exceed 150 characters.';
+        }
         if ($values['code'] === '') {
             $errors['code'] = 'Code is required.';
         } elseif (strlen($values['code']) > 50) {
@@ -147,6 +188,8 @@ class Departments extends Controller
         }
         if ($values['email'] === '' || !filter_var($values['email'], FILTER_VALIDATE_EMAIL)) {
             $errors['email'] = 'A valid email address is required.';
+        } elseif (strlen($values['email']) > 150) {
+            $errors['email'] = 'Email must not exceed 150 characters.';
         }
         if ($parentId !== null && $values['division_name'] !== '' &&
             $this->departmentModel->divisionNameExists($parentId, $values['division_name'], $excludeId)) {

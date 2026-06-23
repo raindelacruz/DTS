@@ -19,24 +19,192 @@ class ValidationException extends Exception
 class AuthorizationException extends RuntimeException {}
 class NotFoundException extends RuntimeException {}
 
+function isTrustedProxyRequest()
+{
+    $remoteAddress = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    return $remoteAddress !== '' && in_array($remoteAddress, TRUSTED_PROXIES, true);
+}
+
+function clientIpAddress()
+{
+    if (isTrustedProxyRequest() && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $candidate = trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
+        if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+            return $candidate;
+        }
+    }
+    $remoteAddress = (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+    return filter_var($remoteAddress, FILTER_VALIDATE_IP) ? $remoteAddress : '0.0.0.0';
+}
+
+function isSecureRequest()
+{
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+        return true;
+    }
+    return isTrustedProxyRequest() && strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0])) === 'https';
+}
+
+function validatePasswordPolicy($password)
+{
+    $errors = [];
+    if (strlen((string) $password) < PASSWORD_MIN_LENGTH) {
+        $errors[] = 'Password must be at least ' . PASSWORD_MIN_LENGTH . ' characters.';
+    }
+    if (strlen((string) $password) > 128) {
+        $errors[] = 'Password must not exceed 128 characters.';
+    }
+    return $errors;
+}
+
+function encryptSensitiveValue($plaintext)
+{
+    $key = hash('sha256', APP_KEY, true);
+    $iv = random_bytes(12);
+    $tag = '';
+    $ciphertext = openssl_encrypt((string) $plaintext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($ciphertext === false) {
+        throw new RuntimeException('Sensitive value encryption failed.');
+    }
+    return base64_encode($iv . $tag . $ciphertext);
+}
+
+function decryptSensitiveValue($encoded)
+{
+    $payload = base64_decode((string) $encoded, true);
+    if ($payload === false || strlen($payload) < 29) {
+        return '';
+    }
+    $iv = substr($payload, 0, 12);
+    $tag = substr($payload, 12, 16);
+    $ciphertext = substr($payload, 28);
+    $plaintext = openssl_decrypt($ciphertext, 'aes-256-gcm', hash('sha256', APP_KEY, true), OPENSSL_RAW_DATA, $iv, $tag);
+    return $plaintext === false ? '' : $plaintext;
+}
+
+function securityAudit($eventType, $actorUserId = null, $targetUserId = null, $metadata = [])
+{
+    try {
+        (new SecurityService())->audit($eventType, $actorUserId, $targetUserId, $metadata);
+    } catch (Throwable $e) {
+        appLog('error', 'Security audit write failed', ['event_type' => $eventType, 'message' => $e->getMessage()]);
+        if (APP_ENV === 'production') {
+            throw $e;
+        }
+    }
+}
+
+function scanUploadedFileOrFail($path)
+{
+    if (!REQUIRE_MALWARE_SCAN && MALWARE_SCAN_COMMAND === '') {
+        return;
+    }
+    if (MALWARE_SCAN_COMMAND === '') {
+        throw new RuntimeException('Malware scanning is required but not configured.');
+    }
+    if (!function_exists('exec')) {
+        throw new RuntimeException('Malware scanning cannot run because process execution is disabled.');
+    }
+    $command = MALWARE_SCAN_COMMAND . ' ' . escapeshellarg($path) . ' 2>&1';
+    exec($command, $output, $exitCode);
+    if ($exitCode !== 0) {
+        throw new ValidationException('The attachment failed the security scan.');
+    }
+}
+
+function ensureUploadCapacityOrFail($incomingBytes)
+{
+    $usedBytes = 0;
+    if (is_dir(UPLOAD_ROOT)) {
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(UPLOAD_ROOT, FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $file) {
+            if ($file->isFile()) {
+                $usedBytes += $file->getSize();
+            }
+        }
+    }
+    $quotaBytes = UPLOAD_STORAGE_QUOTA_MB * 1024 * 1024;
+    $freeBytes = @disk_free_space(dirname(UPLOAD_ROOT));
+    if ($usedBytes + (int) $incomingBytes > $quotaBytes || ($freeBytes !== false && $freeBytes < (int) $incomingBytes + 50 * 1024 * 1024)) {
+        throw new ValidationException('Attachment storage capacity has been reached. Contact an administrator.');
+    }
+}
+
+function clearAuthenticatedSession()
+{
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+    }
+    session_destroy();
+    session_start();
+}
+
+function refreshAuthenticatedSession()
+{
+    if (empty($_SESSION['user_id'])) {
+        return false;
+    }
+
+    $db = new Database();
+    $now = time();
+    if (empty($_SESSION['authenticated_at']) || !array_key_exists('session_version', $_SESSION)) {
+        clearAuthenticatedSession();
+        return false;
+    }
+    if (!empty($_SESSION['authenticated_at']) && $now - (int) $_SESSION['authenticated_at'] > SESSION_ABSOLUTE_TIMEOUT_SECONDS) {
+        clearAuthenticatedSession();
+        return false;
+    }
+    if (!empty($_SESSION['last_activity_at']) && $now - (int) $_SESSION['last_activity_at'] > SESSION_IDLE_TIMEOUT_SECONDS) {
+        clearAuthenticatedSession();
+        return false;
+    }
+
+    $db->query("SELECT id, firstname, lastname, email, department_id, role, status, session_version, mfa_enabled FROM users WHERE id = :id LIMIT 1");
+    $db->bind(':id', (int) $_SESSION['user_id']);
+    $user = $db->single();
+
+    if (!$user || ($user->status ?? 'inactive') !== 'active' || (int) ($user->session_version ?? 0) !== (int) ($_SESSION['session_version'] ?? 0)) {
+        clearAuthenticatedSession();
+        return false;
+    }
+
+    $_SESSION['department_id'] = (int) $user->department_id;
+    $_SESSION['role'] = (string) $user->role;
+    $_SESSION['fullname'] = trim((string) $user->firstname . ' ' . (string) $user->lastname);
+    $_SESSION['email'] = (string) ($user->email ?? '');
+    $_SESSION['last_activity_at'] = $now;
+    if ($_SESSION['role'] === 'admin' && empty($user->mfa_enabled)) {
+        redirect('/auth/mfaSetup', 303);
+    }
+    if ($_SESSION['role'] === 'admin' && empty($_SESSION['mfa_verified'])) {
+        redirect('/auth/mfa', 303);
+    }
+    return true;
+}
+
 function requireLogin()
 {
-    if (!isset($_SESSION['user_id'])) {
-        flash('error', 'Please sign in to continue.', 'error');
-        redirect('/auth/login');
+    if (!refreshAuthenticatedSession()) {
+        flash('error', 'Please sign in with an active account to continue.', 'error');
+        redirect('/auth/login', 303);
     }
 }
 
 function requireRole($role)
 {
-    if ($_SESSION['role'] !== $role) {
+    requireLogin();
+    if (($_SESSION['role'] ?? '') !== $role) {
         throw new AuthorizationException('Access denied.');
     }
 }
 
 function allowRoles($roles = [])
 {
-    if (!in_array($_SESSION['role'], $roles)) {
+    requireLogin();
+    if (!in_array($_SESSION['role'] ?? '', $roles, true)) {
         throw new AuthorizationException('Access denied.');
     }
 }
@@ -209,6 +377,37 @@ function requirePost()
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
         throw new ValidationException('Invalid request method.');
     }
+}
+
+function paginationRequest($perPage = 10, $maxPerPage = 10)
+{
+    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $perPage = max(1, min($maxPerPage, (int) ($_GET['per_page'] ?? $perPage)));
+    return ['page' => $page, 'per_page' => $perPage, 'offset' => ($page - 1) * $perPage];
+}
+
+function paginationMeta($total, $page, $perPage)
+{
+    $pages = max(1, (int) ceil((int) $total / max(1, (int) $perPage)));
+    return ['total' => (int) $total, 'page' => min((int) $page, $pages), 'per_page' => (int) $perPage, 'pages' => $pages];
+}
+
+function renderServerPagination($meta)
+{
+    if (empty($meta) || ($meta['pages'] ?? 1) <= 1) {
+        return;
+    }
+    $page = (int) $meta['page'];
+    $pages = (int) $meta['pages'];
+    $query = $_GET;
+    echo '<nav class="d-flex justify-content-between align-items-center mt-3" aria-label="Pagination">';
+    echo '<span class="text-muted small">Page ' . $page . ' of ' . $pages . ' · ' . (int) $meta['total'] . ' records</span><span class="d-flex gap-2">';
+    foreach ([['Previous', $page - 1, $page > 1], ['Next', $page + 1, $page < $pages]] as [$label, $target, $enabled]) {
+        $query['page'] = $target;
+        $url = htmlspecialchars('?' . http_build_query($query), ENT_QUOTES, 'UTF-8');
+        echo $enabled ? '<a class="btn btn-sm btn-outline-secondary" href="' . $url . '">' . $label . '</a>' : '<span class="btn btn-sm btn-outline-secondary disabled">' . $label . '</span>';
+    }
+    echo '</span></nav>';
 }
 
 

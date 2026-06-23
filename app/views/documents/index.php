@@ -7,6 +7,7 @@ $statusClasses = [
     'Released' => 'bg-warning-subtle text-warning border border-warning-subtle',
     'Received' => 'bg-success-subtle text-success border border-success-subtle',
     'Returned' => 'bg-danger-subtle text-danger border border-danger-subtle',
+    'Cancelled' => 'bg-danger-subtle text-danger border border-danger-subtle',
     'Re-released' => 'bg-primary-subtle text-primary border border-primary-subtle'
 ];
 ?>
@@ -62,7 +63,7 @@ $statusClasses = [
                 <label class="form-label fw-semibold">Status</label>
                 <select name="status" class="form-select">
                     <option value="">All Status</option>
-                    <?php foreach (['Draft', 'Released', 'Re-released', 'Received', 'Returned'] as $status): ?>
+                    <?php foreach (['Draft', 'Released', 'Re-released', 'Received', 'Returned', 'Cancelled'] as $status): ?>
                         <option value="<?php echo $status; ?>" <?php echo (($filters['status'] ?? '') === $status) ? 'selected' : ''; ?>><?php echo $status; ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -116,5 +117,7 @@ $statusClasses = [
         </table>
     </div>
 </div>
+
+<?php renderServerPagination($data['pagination'] ?? null); ?>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

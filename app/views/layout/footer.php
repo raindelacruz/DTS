@@ -7,7 +7,7 @@
 document.addEventListener('DOMContentLoaded', function () {
     var rowsPerPage = 10;
 
-    document.querySelectorAll('.table-responsive > table').forEach(function (table) {
+    document.querySelectorAll('.table-responsive > table[data-client-pagination="true"]').forEach(function (table) {
         var wrapper = table.closest('.table-responsive');
         var tbody = table.tBodies && table.tBodies[0];
 

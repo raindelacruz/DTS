@@ -11,6 +11,7 @@ class DepartmentActionSlip
     public const STATUS_FOR_ACTION = 'For Action';
     public const STATUS_COMPLETED = 'Completed';
     public const STATUS_RETURNED = 'Returned';
+    public const STATUS_CANCELLED = 'Cancelled';
 
     public function __construct()
     {
@@ -21,7 +22,6 @@ class DepartmentActionSlip
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
         );
 
-        $this->ensureSchema();
     }
 
     public static function statuses()
@@ -33,7 +33,8 @@ class DepartmentActionSlip
             self::STATUS_DELEGATED,
             self::STATUS_FOR_ACTION,
             self::STATUS_COMPLETED,
-            self::STATUS_RETURNED
+            self::STATUS_RETURNED,
+            self::STATUS_CANCELLED
         ];
     }
 
@@ -161,7 +162,7 @@ class DepartmentActionSlip
                 WHEN status IN ('Staff Completed', 'Division Confirmed', 'Department Completed', 'Closed') THEN 'Completed'
                 ELSE status
             END
-            WHERE status NOT IN ('Draft', 'Released', 'Received', 'Delegated', 'For Action', 'Completed', 'Returned')
+            WHERE status NOT IN ('Draft', 'Released', 'Received', 'Delegated', 'For Action', 'Completed', 'Returned', 'Cancelled')
         ");
     }
 
@@ -497,13 +498,11 @@ class DepartmentActionSlip
 
     public function getVisible($userId, $departmentId, $role, $filters = [])
     {
-        $params = [
-            'user_id' => (int) $userId,
-            'department_id' => (int) $departmentId
-        ];
+        $params = [];
 
         $where = [];
         if ($role === 'staff') {
+            $params['user_id'] = (int) $userId;
             $where[] = "(
                 das.assigned_staff_id = :user_id
                 OR EXISTS (
@@ -514,6 +513,8 @@ class DepartmentActionSlip
                 )
             )";
         } elseif ($role !== 'admin') {
+            $params['user_id'] = (int) $userId;
+            $params['department_id'] = (int) $departmentId;
             $where[] = "(
                 das.receiving_department_id = :department_id
                 OR das.receiving_division_id = :department_id
@@ -541,10 +542,33 @@ class DepartmentActionSlip
                 das.updated_at DESC,
                 das.id DESC
         ";
+        if (isset($filters['_limit'])) {
+            $limit = max(1, min(100, (int) $filters['_limit']));
+            $offset = max(0, (int) ($filters['_offset'] ?? 0));
+            $sql .= " LIMIT {$limit} OFFSET {$offset}";
+        }
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function countVisible($userId, $departmentId, $role, $filters = [])
+    {
+        $params = [];
+        $where = [];
+        if ($role === 'staff') {
+            $params['user_id'] = (int) $userId;
+            $where[] = "(das.assigned_staff_id = :user_id OR EXISTS (SELECT 1 FROM department_action_slip_events e WHERE e.slip_id = das.id AND (e.actor_user_id = :user_id OR e.to_user_id = :user_id)))";
+        } elseif ($role !== 'admin') {
+            $params['user_id'] = (int) $userId;
+            $params['department_id'] = (int) $departmentId;
+            $where[] = "(das.receiving_department_id = :department_id OR das.receiving_division_id = :department_id OR das.current_department_id = :department_id OR das.current_division_id = :department_id OR das.assigned_staff_id = :user_id OR EXISTS (SELECT 1 FROM department_action_slip_events e WHERE e.slip_id = das.id AND (e.actor_department_id = :department_id OR e.from_department_id = :department_id OR e.to_department_id = :department_id OR e.to_user_id = :user_id)))";
+        }
+        $this->applyFilters($where, $params, $filters);
+        $stmt = $this->db->prepare('SELECT COUNT(DISTINCT das.id) FROM department_action_slips das' . $this->buildWhere($where));
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn();
     }
 
     public function countByVisibleStatus($userId, $departmentId, $role)
@@ -805,6 +829,23 @@ class DepartmentActionSlip
             'new_status' => self::STATUS_RELEASED,
             'remarks' => $data['remarks'] ?: null
         ]);
+    }
+
+    public function cancelDraft($slipId, $actorUserId, $actorDepartmentId)
+    {
+        $slip = $this->requireSlip($slipId);
+        if (($slip['status'] ?? '') !== self::STATUS_DRAFT) {
+            throw new RuntimeException('Only draft action slips can be cancelled.');
+        }
+
+        $this->transition(
+            $slipId,
+            self::STATUS_CANCELLED,
+            'Draft Cancelled',
+            $actorUserId,
+            $actorDepartmentId,
+            'Draft action slip cancelled by manager.'
+        );
     }
 
     public function routeToDepartment($slipId, $targetDepartmentId, $actorUserId, $actorDepartmentId, $remarks = '', $status = self::STATUS_RELEASED, $action = 'Released to Department')

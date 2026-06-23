@@ -175,7 +175,7 @@ CREATE TABLE `documents` (
   `released_at` datetime DEFAULT NULL,
   `received_by` int(11) DEFAULT NULL,
   `received_at` datetime DEFAULT NULL,
-  `status` enum('Draft','Released','Received','Returned','Re-released') DEFAULT 'Draft'
+  `status` enum('Draft','Released','Received','Returned','Re-released','Cancelled') DEFAULT 'Draft'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -326,21 +326,6 @@ CREATE TABLE `users` (
   `status` enum('active','inactive') DEFAULT 'active',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
---
--- Dumping data for table `users`
---
-
-INSERT INTO `users` (`id`, `id_number`, `firstname`, `lastname`, `middle_initial`, `department_id`, `role`, `email`, `password`, `status`, `created_at`) VALUES
-(10, 'SYSADMIN', 'System', 'Administrator', NULL, 1, 'admin', 'sysadmin@nfa.gov.ph', '$2y$10$bnUZzDW8X20gSy/WKkIcDefLwdvo6f07V5foYMd2rfR2oNmfTQ/FG', 'active', '2026-06-08 05:15:37'),
-(11, 'ICTSD-MGR', 'ICTSD', 'Manager', NULL, 12, 'manager', 'ictsd.manager@nfa.gov.ph', '$2y$10$19b0t6jArjFrwLCY2HEdZuQep90z2NcHWB24OMgWHS4q4egm.5sbC', 'active', '2026-06-08 06:00:00'),
-(12, 'ICTSD-STF01', 'ICTSD', 'Staff One', NULL, 12, 'staff', 'ictsd.staff01@nfa.gov.ph', '$2y$10$skJjgIizyA2u1bvewyn2w.SLutvR1YeKDQ4p6U8k4kk7Rk2CUveAq', 'active', '2026-06-08 06:00:00'),
-(13, 'ICTSD-STF02', 'ICTSD', 'Staff Two', NULL, 12, 'staff', 'ictsd.staff02@nfa.gov.ph', '$2y$10$RW8Y2y8BJWmbp.ZANwNUluAMWIOyExknhMtKKRbh.XHSSwCJbnxHS', 'active', '2026-06-08 06:00:00'),
-(14, 'ICTSD-STF03', 'ICTSD', 'Staff Three', NULL, 12, 'staff', 'ictsd.staff03@nfa.gov.ph', '$2y$10$MZIwSbe415zUdG/9YqUc3OTu0zuPlgUtXaSlObZ5L0b2ngaHVs0WO', 'active', '2026-06-08 06:00:00'),
-(19, 'CPD-MGR', 'CPD', 'Manager', NULL, 11, 'manager', 'cpd.manager@nfa.gov.ph', '$2y$10$KVRT2OzyRoGkSnpF9wDMCOIgQ1FiR2o33rHEJ3cd5SIRy8yLAqVxO', 'active', '2026-06-08 06:00:00'),
-(20, 'CPD-STF01', 'CPD', 'Staff One', NULL, 11, 'staff', 'cpd.staff01@nfa.gov.ph', '$2y$10$BHXsVO5NQW3Xc6hLe5488OQBtv3V2dyZWkrstrJFDnWkp3vNgy/OC', 'active', '2026-06-08 06:00:00'),
-(21, 'CPD-STF02', 'CPD', 'Staff Two', NULL, 11, 'staff', 'cpd.staff02@nfa.gov.ph', '$2y$10$7U/t3FOLIOjqVdU8.vnDoOvSNWxKNhvtWOc3MxAFLAQvmkV5aIu.a', 'active', '2026-06-08 06:00:00'),
-(22, 'CPD-STF03', 'CPD', 'Staff Three', NULL, 11, 'staff', 'cpd.staff03@nfa.gov.ph', '$2y$10$GYqrT6k0ztDoqJCDHu409uN9M2/C3UlzZar6rZ0RobvF91S6j7Y9e', 'active', '2026-06-08 06:00:00');
 
 --
 -- Indexes for dumped tables

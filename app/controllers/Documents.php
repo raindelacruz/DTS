@@ -467,6 +467,10 @@ class Documents extends Controller
             throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment exceeds the ' . MAX_ATTACHMENT_SIZE_MB . ' MB limit.']);
         }
 
+        if ((int) ($_FILES[$fieldName]['size'] ?? 0) <= 0) {
+            throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment cannot be empty.']);
+        }
+
         $tmpPath = $_FILES[$fieldName]['tmp_name'] ?? '';
         if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
             throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Invalid uploaded file.']);
@@ -495,6 +499,10 @@ class Documents extends Controller
         if (!in_array($extension, $validExtensions, true)) {
             throw new ValidationException('Please correct the highlighted fields.', ['attachment' => 'Attachment file extension does not match the uploaded content.']);
         }
+
+
+        ensureUploadCapacityOrFail((int) $_FILES[$fieldName]['size']);
+        scanUploadedFileOrFail($tmpPath);
 
         $this->ensureUploadDirectory();
         $filename = $this->generateAttachmentFilename($allowedMimeTypes[$mimeType]);
@@ -843,14 +851,9 @@ class Documents extends Controller
         try {
             $department_id = (int) $_SESSION['department_id'];
             $filters = $this->getListFilters();
-
-            if ($this->hasFilters($filters)) {
-                $documents = $this->documentModel->search($department_id, $filters);
-            } else {
-                $documents = $this->documentModel->getAllByDepartment($department_id);
-            }
-
-            $documents = $this->filterManagerVisibleDocuments($documents, $department_id);
+            $pagination = paginationRequest();
+            $result = $this->documentModel->paginateForDepartment($department_id, $filters, 'all', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null);
+            $documents = $result['items'];
 
             $statusCounts = [
                 'Draft' => 0,
@@ -871,7 +874,8 @@ class Documents extends Controller
                 'filters' => $filters,
                 'types' => $this->extractTypes($documents),
                 'status_counts' => $statusCounts,
-                'total_documents' => count($documents)
+                'total_documents' => $result['total'],
+                'pagination' => paginationMeta($result['total'], $pagination['page'], $pagination['per_page'])
             ];
 
             $this->view('documents/index', $data);
@@ -887,14 +891,17 @@ class Documents extends Controller
         try {
             $departmentId = (int) $_SESSION['department_id'];
             $filters = $this->getListFilters();
-            $documents = $this->documentModel->getOutgoingByDepartment($departmentId, $filters);
+            $pagination = paginationRequest();
+            $result = $this->documentModel->paginateForDepartment($departmentId, $filters, 'outgoing', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null);
+            $documents = $result['items'];
 
             $data = [
                 'title' => 'Outgoing Documents',
                 'documents' => $documents,
                 'filters' => $filters,
                 'types' => $this->extractTypes($this->documentModel->getOutgoingByDepartment($departmentId)),
-                'empty_message' => 'No outgoing documents found.'
+                'empty_message' => 'No outgoing documents found.',
+                'pagination' => paginationMeta($result['total'], $pagination['page'], $pagination['per_page'])
             ];
 
             $this->view('documents/outgoing', $data);
@@ -910,15 +917,17 @@ class Documents extends Controller
         try {
             $departmentId = (int) $_SESSION['department_id'];
             $filters = $this->getListFilters();
-            $documents = $this->documentModel->getIncomingByDepartment($departmentId, $filters);
-            $documents = $this->filterManagerVisibleDocuments($documents, $departmentId);
+            $pagination = paginationRequest();
+            $result = $this->documentModel->paginateForDepartment($departmentId, $filters, 'incoming', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null);
+            $documents = $result['items'];
 
             $data = [
                 'title' => 'Incoming Documents',
                 'documents' => $documents,
                 'filters' => $filters,
                 'types' => $this->extractTypes($this->filterManagerVisibleDocuments($this->documentModel->getIncomingByDepartment($departmentId), $departmentId)),
-                'empty_message' => 'No incoming documents found.'
+                'empty_message' => 'No incoming documents found.',
+                'pagination' => paginationMeta($result['total'], $pagination['page'], $pagination['per_page'])
             ];
 
             $this->view('documents/incoming', $data);
@@ -1192,6 +1201,46 @@ class Documents extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'documents.receive', 'document_id' => $documentId]);
             flash('error', 'We could not receive that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function cancel($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+            if (!$this->isManager()) {
+                throw new AuthorizationException('Only managers can cancel draft documents.');
+            }
+
+            $document = $this->findOwnedDraftOrFail($documentId);
+            $this->documentModel->cancelDraftDocument($documentId, (int) $_SESSION['user_id'], (int) $_SESSION['department_id']);
+
+            if ((int) ($document['created_by'] ?? 0) !== (int) $_SESSION['user_id']) {
+                $this->notificationModel->create(
+                    (int) $document['created_by'],
+                    'Draft document cancelled',
+                    $document['prefix'] . ' was cancelled by your manager.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Draft document cancelled.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to cancel that document.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.cancel', 'document_id' => $documentId]);
+            flash('error', 'We could not cancel that draft document right now.', 'error');
             redirect('/documents/show/' . $documentId, 303);
         }
     }
@@ -2052,6 +2101,8 @@ class Documents extends Controller
             }
 
             $mimeType = $this->detectAttachmentMimeType($attachmentPath);
+            header('Cache-Control: private, no-store, max-age=0');
+            header('Pragma: no-cache');
             header('Content-Type: ' . $mimeType);
             header('Content-Length: ' . (string) filesize($attachmentPath));
             header('Content-Disposition: inline; filename="' . rawurlencode($requestedAttachment) . '"');
@@ -2132,6 +2183,8 @@ class Documents extends Controller
 
             $mimeType = $this->detectAttachmentMimeType($attachmentPath);
 
+            header('Cache-Control: private, no-store, max-age=0');
+            header('Pragma: no-cache');
             header('Content-Type: ' . $mimeType);
             header('Content-Length: ' . (string) filesize($attachmentPath));
             header('Content-Disposition: inline; filename="' . rawurlencode($document['attachment']) . '"');
@@ -2191,6 +2244,8 @@ class Documents extends Controller
                 exit;
             }
 
+            header('Cache-Control: private, no-store, max-age=0');
+            header('Pragma: no-cache');
             header('Content-Type: application/pdf');
             header('Content-Length: ' . (string) filesize($attachmentPath));
             header('Content-Disposition: inline; filename="' . rawurlencode($downloadName) . '"');

@@ -80,6 +80,10 @@ class ActionSlips extends Controller
     {
         try {
             $filters = $this->getFilters();
+            $pagination = paginationRequest();
+            $totalSlips = $this->slipModel->countVisible($this->currentUserId(), $this->currentDepartmentId(), $_SESSION['role'] ?? '', $filters);
+            $filters['_limit'] = $pagination['per_page'];
+            $filters['_offset'] = $pagination['offset'];
             $slips = $this->slipModel->getVisible($this->currentUserId(), $this->currentDepartmentId(), $_SESSION['role'] ?? '', $filters);
 
             $data = [
@@ -90,7 +94,8 @@ class ActionSlips extends Controller
                 'divisions' => $this->getAllDivisions(),
                 'staff' => $this->getVisibleStaff(),
                 'status_counts' => $this->slipModel->countByVisibleStatus($this->currentUserId(), $this->currentDepartmentId(), $_SESSION['role'] ?? ''),
-                'can_create' => $this->canCreate()
+                'can_create' => $this->canCreate(),
+                'pagination' => paginationMeta($totalSlips, $pagination['page'], $pagination['per_page'])
             ];
 
             $this->view('action_slips/index', $data);
@@ -590,6 +595,7 @@ class ActionSlips extends Controller
         return [
             'receive_department' => $isDepartmentManager && $isDepartmentLevelSlip && $status === DepartmentActionSlip::STATUS_RELEASED,
             'finalize_draft' => $status === DepartmentActionSlip::STATUS_DRAFT && ($currentDivisionId > 0 ? $isDivisionManager : $isDepartmentManager),
+            'cancel_draft' => $status === DepartmentActionSlip::STATUS_DRAFT && ($currentDivisionId > 0 ? $isDivisionManager : $isDepartmentManager),
             'route_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'delegate_division' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
             'complete_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RETURNED], true),
@@ -879,6 +885,26 @@ class ActionSlips extends Controller
         });
     }
 
+    public function cancelDraft($id)
+    {
+        $this->handleAction($id, function ($slipId, $slip) {
+            if (!$this->allowedActions($slip)['cancel_draft']) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $this->slipModel->cancelDraft($slipId, $this->currentUserId(), $this->currentDepartmentId());
+            if ((int) ($slip['created_by'] ?? 0) !== $this->currentUserId()) {
+                $this->notificationModel->create(
+                    (int) $slip['created_by'],
+                    'Draft action slip cancelled',
+                    $slip['slip_number'] . ' was cancelled by your manager.',
+                    '/actionSlips/show/' . $slipId
+                );
+            }
+            flash('success', 'Draft action slip cancelled.', 'success');
+        });
+    }
+
     public function startStaff($id)
     {
         $this->handleAction($id, function ($slipId, $slip) {
@@ -1095,12 +1121,44 @@ class ActionSlips extends Controller
             throw new ValidationException('The attachment must not exceed ' . MAX_ATTACHMENT_SIZE_MB . ' MB.');
         }
 
+        $tmpPath = (string) ($_FILES[$field]['tmp_name'] ?? '');
+        if ($tmpPath === '' || !is_uploaded_file($tmpPath) || (int) $_FILES[$field]['size'] <= 0) {
+            throw new ValidationException('The uploaded file is invalid or empty.');
+        }
+
         $allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'doc', 'docx', 'xls', 'xlsx'];
         $originalName = basename((string) $_FILES[$field]['name']);
         $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
         if (!in_array($extension, $allowedExtensions, true)) {
             throw new ValidationException('Upload a supported document or image file.');
         }
+
+        $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($tmpPath);
+        $allowedMimeByExtension = [
+            'pdf' => ['application/pdf'],
+            'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'],
+            'png' => ['image/png'], 'gif' => ['image/gif'], 'webp' => ['image/webp'],
+            'doc' => ['application/msword', 'application/CDFV2'],
+            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+            'xls' => ['application/vnd.ms-excel', 'application/CDFV2'],
+            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip']
+        ];
+        if (!in_array($mimeType, $allowedMimeByExtension[$extension] ?? [], true)) {
+            throw new ValidationException('The attachment extension does not match its detected content type.');
+        }
+        if (in_array($extension, ['docx', 'xlsx'], true) && $mimeType === 'application/zip') {
+            if (!class_exists('ZipArchive')) {
+                throw new RuntimeException('The PHP ZIP extension is required to validate Office documents.');
+            }
+            $archive = new ZipArchive();
+            if ($archive->open($tmpPath) !== true || $archive->locateName('[Content_Types].xml') === false) {
+                throw new ValidationException('The Office document is invalid.');
+            }
+            $archive->close();
+        }
+
+        ensureUploadCapacityOrFail((int) $_FILES[$field]['size']);
+        scanUploadedFileOrFail($tmpPath);
 
         $uploadDir = rtrim(UPLOAD_ROOT, '/\\') . '/' . trim($subdir, '/\\');
         if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true)) {
@@ -1109,7 +1167,7 @@ class ActionSlips extends Controller
 
         $safeName = date('YmdHis') . '_' . bin2hex(random_bytes(6)) . '.' . $extension;
         $target = $uploadDir . '/' . $safeName;
-        if (!move_uploaded_file($_FILES[$field]['tmp_name'], $target)) {
+        if (!move_uploaded_file($tmpPath, $target)) {
             throw new RuntimeException('Unable to save uploaded file.');
         }
 
@@ -1128,9 +1186,13 @@ class ActionSlips extends Controller
         }
 
         $mimeType = function_exists('mime_content_type') ? (mime_content_type($realPath) ?: 'application/octet-stream') : 'application/octet-stream';
+        header('Cache-Control: private, no-store, max-age=0');
+        header('Pragma: no-cache');
+        header('X-Content-Type-Options: nosniff');
         header('Content-Type: ' . $mimeType);
         header('Content-Length: ' . filesize($realPath));
-        header('Content-Disposition: inline; filename="' . basename($realPath) . '"');
+        $disposition = ($mimeType === 'application/pdf' || strpos($mimeType, 'image/') === 0) ? 'inline' : 'attachment';
+        header('Content-Disposition: ' . $disposition . '; filename="' . basename($realPath) . '"');
         readfile($realPath);
         exit;
     }

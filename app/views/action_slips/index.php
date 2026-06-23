@@ -9,7 +9,8 @@ $statusClasses = [
     'Delegated' => 'bg-primary-subtle text-primary border border-primary-subtle',
     'For Action' => 'bg-warning-subtle text-warning border border-warning-subtle',
     'Completed' => 'bg-success-subtle text-success border border-success-subtle',
-    'Returned' => 'bg-danger-subtle text-danger border border-danger-subtle'
+    'Returned' => 'bg-danger-subtle text-danger border border-danger-subtle',
+    'Cancelled' => 'bg-danger-subtle text-danger border border-danger-subtle'
 ];
 ?>
 
@@ -141,5 +142,7 @@ $statusClasses = [
         </table>
     </div>
 </div>
+
+<?php renderServerPagination($data['pagination'] ?? null); ?>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

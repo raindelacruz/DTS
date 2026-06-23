@@ -15,8 +15,6 @@ class Document
             ]
         );
 
-        $this->ensureRoutingTable();
-        $this->ensureSchema();
     }
 
     private function ensureRoutingTable()
@@ -75,10 +73,10 @@ class Document
             ");
         }
 
-        if (!$this->enumColumnIncludes('documents', 'status', 'Returned') || !$this->enumColumnIncludes('documents', 'status', 'Re-released')) {
+        if (!$this->enumColumnIncludes('documents', 'status', 'Returned') || !$this->enumColumnIncludes('documents', 'status', 'Re-released') || !$this->enumColumnIncludes('documents', 'status', 'Cancelled')) {
             $this->db->exec("
                 ALTER TABLE documents
-                MODIFY status ENUM('Draft','Released','Received','Returned','Re-released') DEFAULT 'Draft'
+                MODIFY status ENUM('Draft','Released','Received','Returned','Re-released','Cancelled') DEFAULT 'Draft'
             ");
         }
 
@@ -491,7 +489,7 @@ class Document
                     AND l.department_id = :dept
                 )
                 OR (
-                    d.status <> 'Draft'
+                    d.status NOT IN ('Draft', 'Cancelled')
                     AND (
                         EXISTS (
                             SELECT 1
@@ -1828,6 +1826,58 @@ class Document
         return $sql;
     }
 
+    public function paginateForDepartment($departmentId, $filters, $scope, $page, $perPage, $managerUserId = null)
+    {
+        $departmentId = (int) $departmentId;
+        $params = [];
+        if ($scope === 'outgoing') {
+            $from = 'FROM documents d';
+            $where = 'WHERE d.origin_department_id = :department_id';
+            $params['department_id'] = $departmentId;
+        } elseif ($scope === 'incoming') {
+            $from = 'FROM documents d LEFT JOIN document_routes r ON d.id = r.document_id AND r.to_department_id = :department_id';
+            $where = "WHERE d.status IN ('Released','Re-released','Received') AND (
+                (r.routing_type = 'THRU' AND r.status = 'Pending')
+                OR (r.routing_type IN ('TO','CC','DELEGATE') AND r.status = 'Pending' AND (
+                    NOT EXISTS (SELECT 1 FROM document_routes t WHERE t.document_id = d.id AND t.routing_type = 'THRU')
+                    OR EXISTS (SELECT 1 FROM document_routes t WHERE t.document_id = d.id AND t.routing_type = 'THRU' AND t.status = 'Received')
+                ))
+                OR (r.id IS NULL AND d.destination_department_id = :destination_department_id AND d.status IN ('Released','Re-released'))
+            )";
+            $params['department_id'] = $departmentId;
+            $params['destination_department_id'] = $departmentId;
+        } else {
+            $from = 'FROM documents d';
+            $where = 'WHERE ' . $this->visibilityWhereClause();
+            $params['dept'] = $departmentId;
+        }
+
+        $where .= $this->buildDocumentFilterClause($filters, $params);
+        if ($managerUserId !== null) {
+            $where .= " AND (d.origin_department_id = :manager_department_id OR EXISTS (
+                SELECT 1 FROM document_logs ml
+                WHERE ml.document_id = d.id AND ml.department_id = :manager_department_id2 AND ml.action_by <> :manager_user_id
+            ))";
+            $params['manager_department_id'] = $departmentId;
+            $params['manager_department_id2'] = $departmentId;
+            $params['manager_user_id'] = (int) $managerUserId;
+        }
+
+        $countStmt = $this->db->prepare("SELECT COUNT(DISTINCT d.id) {$from} {$where}");
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $perPage = max(1, min(100, (int) $perPage));
+        $page = max(1, (int) $page);
+        $offset = ($page - 1) * $perPage;
+        $order = $scope === 'incoming'
+            ? 'ORDER BY d.released_at DESC, d.created_at DESC'
+            : 'ORDER BY COALESCE(d.released_at, d.created_at) DESC, d.created_at DESC';
+        $stmt = $this->db->prepare("SELECT DISTINCT d.* {$from} {$where} {$order} LIMIT {$perPage} OFFSET {$offset}");
+        $stmt->execute($params);
+        return ['items' => $stmt->fetchAll(PDO::FETCH_ASSOC), 'total' => $total];
+    }
+
     public function getRecent($limit = 10)
     {
         $stmt = $this->db->prepare("
@@ -2190,6 +2240,45 @@ class Document
         ]);
 
         return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function cancelDraftDocument($id, $user_id, $department_id)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $stmt = $this->db->prepare("
+                UPDATE documents
+                SET status = 'Cancelled'
+                WHERE id = :id
+                AND status = 'Draft'
+            ");
+            $stmt->execute(['id' => (int) $id]);
+
+            if ($stmt->rowCount() !== 1) {
+                throw new RuntimeException('Only draft documents can be cancelled.');
+            }
+
+            $log = $this->db->prepare("
+                INSERT INTO document_logs
+                (document_id, action, action_by, department_id, remarks)
+                VALUES
+                (:document_id, 'Cancelled', :action_by, :department_id, 'Draft document cancelled by manager')
+            ");
+            $log->execute([
+                'document_id' => (int) $id,
+                'action_by' => (int) $user_id,
+                'department_id' => (int) $department_id
+            ]);
+
+            $this->db->commit();
+            return true;
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
     }
 
     public function getActiveStaffByDepartment($department_id)

@@ -111,7 +111,7 @@
                 </div>
                 <div class="field">
                     <label for="password">Password</label>
-                    <input id="password" type="password" name="password" class="<?php echo !empty($data['errors']['password']) ? 'is-invalid' : ''; ?>" required>
+                    <input id="password" type="password" name="password" minlength="<?php echo PASSWORD_MIN_LENGTH; ?>" autocomplete="new-password" class="<?php echo !empty($data['errors']['password']) ? 'is-invalid' : ''; ?>" required>
                     <?php if (!empty($data['errors']['password'])): ?><div class="field-error"><?php echo htmlspecialchars($data['errors']['password']); ?></div><?php endif; ?>
                 </div>
                 <div class="field" style="grid-column: 1 / -1;">

@@ -5,11 +5,12 @@
         <h1 class="section-title">Department Management</h1>
         <div class="text-muted mt-1">Manage departments and their divisions</div>
     </div>
+    <a href="<?php echo URLROOT; ?>/departments/create" class="btn btn-primary">Add Department</a>
 </div>
 
 <div class="app-card p-4">
     <div class="table-responsive">
-        <table class="table table-modern align-middle mb-0">
+        <table class="table table-modern align-middle mb-0" data-client-pagination="true">
             <thead><tr><th>Department</th><th>Email</th><th>Divisions</th><th class="text-end">Action</th></tr></thead>
             <tbody>
             <?php if (!empty($data['departments'])): ?>

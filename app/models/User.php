@@ -6,7 +6,6 @@ class User {
 
     public function __construct() {
         $this->db = new Database;
-        $this->ensureSchema();
     }
 
     public static function roles()
@@ -136,6 +135,12 @@ class User {
             $whereSql = 'WHERE ' . implode(' AND ', $conditions);
         }
 
+        $limitSql = '';
+        if (isset($filters['_limit'])) {
+            $limit = max(1, min(100, (int) $filters['_limit']));
+            $offset = max(0, (int) ($filters['_offset'] ?? 0));
+            $limitSql = " LIMIT {$limit} OFFSET {$offset}";
+        }
         $this->db->query("
             SELECT
                 u.*,
@@ -147,6 +152,7 @@ class User {
                 CASE WHEN u.status = 'inactive' THEN 0 ELSE 1 END,
                 u.lastname ASC,
                 u.firstname ASC
+            $limitSql
         ");
 
         foreach ($params as $param => $value) {
@@ -154,6 +160,32 @@ class User {
         }
 
         return $this->db->resultSet();
+    }
+
+    public function countSearchWithDepartments($filters = [])
+    {
+        $conditions = [];
+        $params = [];
+        $keyword = trim($filters['q'] ?? '');
+        if ($keyword !== '') {
+            $conditions[] = "(u.id_number LIKE :keyword_id OR u.firstname LIKE :keyword_firstname OR u.lastname LIKE :keyword_lastname OR CONCAT_WS(' ', u.firstname, u.lastname) LIKE :keyword_full)";
+            $value = '%' . $keyword . '%';
+            $params = [':keyword_id' => $value, ':keyword_firstname' => $value, ':keyword_lastname' => $value, ':keyword_full' => $value];
+        }
+        if ((int) ($filters['department_id'] ?? 0) > 0) {
+            $conditions[] = 'u.department_id = :department_id';
+            $params[':department_id'] = (int) $filters['department_id'];
+        }
+        if (($filters['role'] ?? '') !== '' && self::roleExists($filters['role'])) {
+            $conditions[] = 'u.role = :role';
+            $params[':role'] = $filters['role'];
+        }
+        $this->db->query('SELECT COUNT(*) AS total FROM users u' . (empty($conditions) ? '' : ' WHERE ' . implode(' AND ', $conditions)));
+        foreach ($params as $param => $value) {
+            $this->db->bind($param, $value);
+        }
+        $row = $this->db->single();
+        return $row ? (int) $row->total : 0;
     }
 
     public function updateStatus($id, $status)
@@ -199,13 +231,53 @@ class User {
     {
         $this->db->query("
             UPDATE users
-            SET password = :password
+            SET password = :password,
+                password_changed_at = NOW(),
+                must_change_password = 0,
+                session_version = session_version + 1
             WHERE id = :id
         ");
         $this->db->bind(':password', password_hash($password, PASSWORD_DEFAULT));
         $this->db->bind(':id', $id);
 
         return $this->db->execute();
+    }
+
+    public function findByEmail($email)
+    {
+        $this->db->query('SELECT * FROM users WHERE email = :email LIMIT 1');
+        $this->db->bind(':email', strtolower(trim($email)));
+        return $this->db->single();
+    }
+
+    public function markLoginSuccessful($id)
+    {
+        $this->db->query('UPDATE users SET last_login_at = NOW() WHERE id = :id');
+        $this->db->bind(':id', $id);
+        return $this->db->execute();
+    }
+
+    public function configureMfa($id, $encryptedSecret)
+    {
+        $this->db->query('UPDATE users SET mfa_secret = :secret, mfa_enabled = 1, session_version = session_version + 1 WHERE id = :id');
+        $this->db->bind(':secret', $encryptedSecret);
+        $this->db->bind(':id', $id);
+        return $this->db->execute();
+    }
+
+    public function disableMfa($id)
+    {
+        $this->db->query('UPDATE users SET mfa_secret = NULL, mfa_enabled = 0, session_version = session_version + 1 WHERE id = :id');
+        $this->db->bind(':id', $id);
+        return $this->db->execute();
+    }
+
+    public function currentSessionVersion($id)
+    {
+        $this->db->query('SELECT session_version FROM users WHERE id = :id LIMIT 1');
+        $this->db->bind(':id', $id);
+        $row = $this->db->single();
+        return $row ? (int) $row->session_version : 0;
     }
 
     public function findById($id)
@@ -245,80 +317,16 @@ class User {
         return (bool) $this->db->single();
     }
 
-    public function updateProfile($id, $departmentId, $email)
+    public function updateProfile($id, $email)
     {
         $this->db->query("
             UPDATE users
-            SET department_id = :department_id,
-                email = :email
+            SET email = :email
             WHERE id = :id
         ");
-        $this->db->bind(':department_id', $departmentId);
         $this->db->bind(':email', $email);
         $this->db->bind(':id', $id);
 
         return $this->db->execute();
-    }
-
-    private function ensureSchema()
-    {
-        $this->db->query("
-            CREATE TABLE IF NOT EXISTS users (
-                id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                id_number VARCHAR(50) NOT NULL UNIQUE,
-                firstname VARCHAR(100) NOT NULL,
-                lastname VARCHAR(100) NOT NULL,
-                email VARCHAR(150) DEFAULT NULL,
-                department_id INT(11) NOT NULL,
-                role VARCHAR(20) NOT NULL DEFAULT 'staff',
-                status VARCHAR(20) NOT NULL DEFAULT 'inactive',
-                password VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-        ");
-        $this->db->execute();
-
-        if (!$this->columnExists('users', 'status')) {
-            $this->db->query("
-                ALTER TABLE users
-                ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'inactive'
-                AFTER role
-            ");
-            $this->db->execute();
-        }
-
-        if (!$this->columnExists('users', 'created_at')) {
-            $this->db->query("
-                ALTER TABLE users
-                ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            ");
-            $this->db->execute();
-        }
-
-        if (!$this->columnExists('users', 'email')) {
-            $this->db->query("
-                ALTER TABLE users
-                ADD COLUMN email VARCHAR(150) DEFAULT NULL
-                AFTER lastname
-            ");
-            $this->db->execute();
-        }
-    }
-
-    private function columnExists($table, $column)
-    {
-        $this->db->query("
-            SELECT COUNT(*) AS total
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = :schema_name
-            AND TABLE_NAME = :table_name
-            AND COLUMN_NAME = :column_name
-        ");
-        $this->db->bind(':schema_name', DB_NAME);
-        $this->db->bind(':table_name', $table);
-        $this->db->bind(':column_name', $column);
-
-        $result = $this->db->single();
-        return $result && (int) $result->total > 0;
     }
 }

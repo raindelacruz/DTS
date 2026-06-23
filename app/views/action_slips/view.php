@@ -21,7 +21,8 @@ $statusStyle = [
     'Delegated' => 'background:#ede9fe; color:#5b21b6;',
     'For Action' => 'background:#fef3c7; color:#92400e;',
     'Completed' => 'background:#dcfce7; color:#166534;',
-    'Returned' => 'background:#fee2e2; color:#991b1b;'
+    'Returned' => 'background:#fee2e2; color:#991b1b;',
+    'Cancelled' => 'background:#fee2e2; color:#991b1b;'
 ];
 ?>
 
@@ -73,6 +74,13 @@ $statusStyle = [
                     <form action="<?php echo URLROOT; ?>/actionSlips/receiveDepartment/<?php echo (int) $slip['id']; ?>" method="POST">
                         <?php echo csrfInput(); ?>
                         <button type="submit" class="btn btn-primary w-100">Receive</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($actions['cancel_draft'])): ?>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/cancelDraft/<?php echo (int) $slip['id']; ?>" method="POST">
+                        <?php echo csrfInput(); ?>
+                        <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Cancel this draft action slip? This action cannot be undone.');">Cancel Draft</button>
                     </form>
                 <?php endif; ?>
 
@@ -399,7 +407,7 @@ $statusStyle = [
     <h3 class="h5 fw-bold mb-3">Action History</h3>
     <?php if (!empty($data['events'])): ?>
         <div class="table-responsive">
-            <table class="table table-modern align-middle mb-0">
+            <table class="table table-modern align-middle mb-0" data-client-pagination="true">
                 <thead><tr><th>Action</th><th>Actor</th><th>Target</th><th>Status</th><th>Date</th><th>Remarks</th></tr></thead>
                 <tbody>
                     <?php foreach ($data['events'] as $event): ?>

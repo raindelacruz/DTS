@@ -17,6 +17,17 @@ $statusStyle = ($user->status ?? '') === 'active'
     <a href="<?php echo URLROOT; ?>/users" class="btn btn-outline-secondary">Back to Users</a>
 </div>
 
+<?php if (($user->role ?? '') === 'admin' && !empty($user->mfa_enabled)): ?>
+<div class="app-card p-4 mt-4">
+    <h3 class="h5">Administrator MFA recovery</h3>
+    <p class="text-muted">Reset only after verifying the administrator's identity through an approved offline process.</p>
+    <form method="POST" action="<?php echo URLROOT; ?>/users/resetMfa/<?php echo (int) $user->id; ?>" onsubmit="return confirm('Reset MFA for this administrator?');">
+        <?php echo csrfInput(); ?>
+        <button class="btn btn-outline-danger" type="submit">Reset MFA enrollment</button>
+    </form>
+</div>
+<?php endif; ?>
+
 <div class="instruction-card">
     <h3>System Admin View</h3>
     <p>Review the user's <strong>name</strong> and <strong>email address</strong>, then update password, role, status, or department when needed.</p>

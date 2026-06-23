@@ -8,6 +8,7 @@ $statusClasses = [
     'Released' => 'background:#fef3c7; color:#92400e;',
     'Received' => 'background:#dcfce7; color:#166534;',
     'Returned' => 'background:#fee2e2; color:#991b1b;',
+    'Cancelled' => 'background:#fee2e2; color:#991b1b;',
     'Re-released' => 'background:#dbeafe; color:#1e40af;'
 ];
 $receivableStatuses = ['Released', 'Re-released'];
@@ -158,6 +159,12 @@ $renderTimelineRemarks = function ($log) use ($document) {
                         <?php echo csrfInput(); ?>
                         <button type="submit" class="btn btn-success w-100" onclick="return confirm('Release this document?');">Release Document</button>
                     </form>
+                    <?php if ($isManager): ?>
+                        <form action="<?php echo URLROOT; ?>/documents/cancel/<?php echo $document['id']; ?>" method="POST" class="m-0">
+                            <?php echo csrfInput(); ?>
+                            <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Cancel this draft document? This action cannot be undone.');">Cancel Draft</button>
+                        </form>
+                    <?php endif; ?>
                 <?php endif; ?>
 
                 <?php if (!$isManager && empty($internalAssignment) && empty($isDivisionManagerRouteForStaff) && in_array($document['status'], $receivableStatuses, true) && (($routeType && !$routeCleared && ($routeType === 'THRU' || $thruCleared)) || (!$routeType && $document['destination_department_id'] == $_SESSION['department_id']))): ?>
@@ -369,7 +376,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
             <h3 class="h5 fw-bold mb-3">Timeline</h3>
             <?php if (!empty($logs)): ?>
                 <div class="table-responsive">
-                    <table class="table table-modern align-middle mb-0">
+                    <table class="table table-modern align-middle mb-0" data-client-pagination="true">
                         <thead><tr><th>Action</th><th>User</th><th>Department</th><th>Date</th><th>Remarks</th></tr></thead>
                         <tbody>
                             <?php foreach($logs as $log): ?>
@@ -395,7 +402,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
     <div class="app-card p-4 mb-4">
         <h3 class="h5 fw-bold mb-3">Attachment History</h3>
         <div class="table-responsive">
-            <table class="table table-modern align-middle mb-0">
+            <table class="table table-modern align-middle mb-0" data-client-pagination="true">
                 <thead><tr><th>Old Filename</th><th>New Filename</th><th>Uploaded By</th><th>Date Uploaded</th><th>Reason</th><th>Return</th></tr></thead>
                 <tbody>
                     <?php foreach ($attachmentHistory as $history): ?>
