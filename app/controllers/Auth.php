@@ -104,7 +104,13 @@ class Auth extends Controller
                 if (($user->role ?? '') === 'admin' && empty($user->mfa_enabled)) {
                     redirect('/auth/mfaSetup', 303);
                 }
-                if (($user->role ?? '') === 'admin') {
+                if (!empty($user->mfa_enabled)) {
+                    if ($this->hasTrustedMfaDevice($user)) {
+                        $_SESSION['mfa_verified'] = true;
+                        securityAudit('mfa_trusted_device_used', (int) $user->id, (int) $user->id);
+                        flash('auth_success', 'Welcome back.', 'success');
+                        redirect('/dashboard', 303);
+                    }
                     $_SESSION['mfa_verified'] = false;
                     redirect('/auth/mfa', 303);
                 }
@@ -280,15 +286,43 @@ class Auth extends Controller
         $_SESSION['last_activity_at'] = time();
     }
 
+    private function trustedMfaCookieOptions($expires)
+    {
+        $path = parse_url(URLROOT, PHP_URL_PATH) ?: '/';
+        return [
+            'expires' => (int) $expires,
+            'path' => $path === '' ? '/' : $path,
+            'secure' => isSecureRequest(),
+            'httponly' => true,
+            'samesite' => 'Lax'
+        ];
+    }
+
+    private function rememberMfaDevice($user)
+    {
+        $sessionVersion = $this->userModel->currentSessionVersion((int) $user->id);
+        $cookieValue = $this->securityService->createTrustedMfaDevice((int) $user->id, $sessionVersion);
+        setcookie(MFA_TRUSTED_DEVICE_COOKIE, $cookieValue, $this->trustedMfaCookieOptions(time() + MFA_REMEMBER_DEVICE_SECONDS));
+    }
+
+    private function hasTrustedMfaDevice($user)
+    {
+        $cookieValue = $_COOKIE[MFA_TRUSTED_DEVICE_COOKIE] ?? '';
+        if ($cookieValue === '') {
+            return false;
+        }
+        return $this->securityService->isTrustedMfaDevice($cookieValue, (int) $user->id, (int) ($user->session_version ?? 0));
+    }
+
     public function mfaSetup()
     {
         $user = !empty($_SESSION['user_id']) ? $this->userModel->findById((int) $_SESSION['user_id']) : null;
-        if (!$user || ($user->status ?? '') !== 'active' || ($user->role ?? '') !== 'admin') {
+        if (!$user || ($user->status ?? '') !== 'active') {
             clearAuthenticatedSession();
             redirect('/auth/login', 303);
         }
         if (!empty($user->mfa_enabled)) {
-            redirect('/auth/mfa', 303);
+            redirect('/dashboard', 303);
         }
         if (empty($_SESSION['mfa_setup_secret'])) {
             $_SESSION['mfa_setup_secret'] = TotpService::generateSecret();
@@ -304,6 +338,10 @@ class Auth extends Controller
                 $this->userModel->configureMfa((int) $user->id, encryptSensitiveValue($secret));
                 $_SESSION['session_version'] = $this->userModel->currentSessionVersion((int) $user->id);
                 $_SESSION['mfa_verified'] = true;
+                if (!empty($_POST['remember_device'])) {
+                    $user->session_version = $_SESSION['session_version'];
+                    $this->rememberMfaDevice($user);
+                }
                 unset($_SESSION['mfa_setup_secret']);
                 securityAudit('mfa_enabled', (int) $user->id, (int) $user->id);
                 redirect('/dashboard', 303);
@@ -312,16 +350,19 @@ class Auth extends Controller
             }
         }
         $provisioningUri = TotpService::provisioningUri($secret, $user->email ?: $user->id_number, SITENAME);
+        $qrCodeDataUri = QrCodeService::generateSvgDataUri($provisioningUri, 5);
+        $rememberDeviceDays = (int) ceil(MFA_REMEMBER_DEVICE_SECONDS / 86400);
         require_once '../app/views/auth/mfa_setup.php';
     }
 
     public function mfa()
     {
         $user = !empty($_SESSION['user_id']) ? $this->userModel->findById((int) $_SESSION['user_id']) : null;
-        if (!$user || ($user->status ?? '') !== 'active' || ($user->role ?? '') !== 'admin' || empty($user->mfa_enabled)) {
+        if (!$user || ($user->status ?? '') !== 'active' || empty($user->mfa_enabled)) {
             clearAuthenticatedSession();
             redirect('/auth/login', 303);
         }
+        $rememberDeviceDays = (int) ceil(MFA_REMEMBER_DEVICE_SECONDS / 86400);
         $error = '';
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             try {
@@ -334,6 +375,9 @@ class Auth extends Controller
                 session_regenerate_id(true);
                 $_SESSION['mfa_verified'] = true;
                 $_SESSION['last_activity_at'] = time();
+                if (!empty($_POST['remember_device'])) {
+                    $this->rememberMfaDevice($user);
+                }
                 securityAudit('mfa_succeeded', (int) $user->id, (int) $user->id);
                 redirect('/dashboard', 303);
             } catch (ValidationException $e) {

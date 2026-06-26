@@ -1715,34 +1715,45 @@ class Documents extends Controller
                 throw new ValidationException('Returned documents must be corrected and re-released before internal delegation.');
             }
 
-            $assignedToUserId = (int) ($_POST['assigned_to_user_id'] ?? 0);
+            $assignedToUserIds = $_POST['assigned_to_user_ids'] ?? [];
+            if (!is_array($assignedToUserIds)) {
+                $assignedToUserIds = [$assignedToUserIds];
+            }
+            if (empty($assignedToUserIds) && !empty($_POST['assigned_to_user_id'])) {
+                $assignedToUserIds = [$_POST['assigned_to_user_id']];
+            }
+            $assignedToUserIds = array_values(array_unique(array_filter(array_map('intval', $assignedToUserIds))));
             $instructions = trim($_POST['internal_instruction'] ?? '');
 
-            if ($assignedToUserId <= 0) {
-                throw new ValidationException('Select a staff member to delegate this document to.');
+            if (empty($assignedToUserIds)) {
+                throw new ValidationException('Select at least one staff member to delegate this document to.');
             }
 
-            $assignee = $this->documentModel->findActiveStaffInDepartment($assignedToUserId, $deptId);
-            if (!$assignee) {
-                throw new ValidationException('Select an active staff member from your division.');
+            foreach ($assignedToUserIds as $assignedToUserId) {
+                $assignee = $this->documentModel->findActiveStaffInDepartment($assignedToUserId, $deptId);
+                if (!$assignee) {
+                    throw new ValidationException('Select active staff members from your division.');
+                }
             }
 
-            $this->documentModel->assignDocumentInternally(
+            $assignmentResult = $this->documentModel->assignDocumentInternallyToStaff(
                 $documentId,
-                $assignedToUserId,
+                $assignedToUserIds,
                 (int) $_SESSION['user_id'],
                 $deptId,
                 $instructions
             );
 
-            $this->notificationModel->create(
-                $assignedToUserId,
-                'Document assigned to you',
-                $document['prefix'] . ' was internally delegated to you.',
-                '/documents/show/' . $documentId
-            );
+            foreach (($assignmentResult['assignees'] ?? []) as $assignee) {
+                $this->notificationModel->create(
+                    (int) $assignee['id'],
+                    'Document assigned to you',
+                    $document['prefix'] . ' was internally delegated to you.',
+                    '/documents/show/' . $documentId
+                );
+            }
 
-            flash('success', 'Document delegated to staff successfully.', 'success');
+            flash('success', count($assignedToUserIds) === 1 ? 'Document delegated to staff successfully.' : 'Document delegated to staff members successfully.', 'success');
             redirect('/documents/show/' . $documentId, 303);
         } catch (ValidationException $e) {
             flash('error', $e->getMessage(), 'error');
@@ -2124,6 +2135,9 @@ class Documents extends Controller
 
     public function attachment($id)
     {
+        $this->source($id);
+        return;
+
         $documentId = (int) $id;
 
         try {

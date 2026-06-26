@@ -420,15 +420,15 @@ class Users extends Controller
             requirePost();
             validateCsrfOrFail();
             $user = $this->userModel->findById((int) $id);
-            if (!$user || ($user->role ?? '') !== 'admin') {
-                throw new ValidationException('MFA reset is available only for administrator accounts.');
+            if (!$user || empty($user->mfa_enabled)) {
+                throw new ValidationException('MFA is not enabled for this account.');
             }
             if ((int) $user->id === (int) $_SESSION['user_id']) {
                 throw new ValidationException('Another administrator must perform your MFA recovery.');
             }
             $this->userModel->disableMfa((int) $id);
             securityAudit('mfa_reset_by_administrator', (int) $_SESSION['user_id'], (int) $id);
-            flash('users_success', 'MFA was reset. The administrator must enroll again at next login.', 'success');
+            flash('users_success', 'MFA was reset. Administrators must enroll again at next login; other users may enroll again from their profile.', 'success');
         } catch (Throwable $e) {
             reportException($e, ['action' => 'users.resetMfa', 'target_user_id' => (int) $id]);
             flash('users_error', $e instanceof ValidationException ? $e->getMessage() : 'MFA could not be reset.', 'error');

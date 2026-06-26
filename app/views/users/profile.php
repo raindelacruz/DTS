@@ -22,7 +22,13 @@
                 <div class="text-muted mt-1">ID Number: <?php echo htmlspecialchars($data['user']->id_number ?? ''); ?></div>
                 <div class="text-muted">Role: <?php echo htmlspecialchars(ucfirst($data['user']->role ?? 'user')); ?></div>
                 <div class="text-muted">Status: <?php echo htmlspecialchars(ucfirst($data['user']->status ?? 'inactive')); ?></div>
+                <div class="text-muted">MFA: <?php echo !empty($data['user']->mfa_enabled) ? 'Enabled' : 'Not enabled'; ?></div>
             </div>
+            <?php if (empty($data['user']->mfa_enabled)): ?>
+                <div class="mt-4">
+                    <a href="<?php echo URLROOT; ?>/auth/mfaSetup" class="btn btn-outline-primary w-100">Enable MFA</a>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
     <div class="col-lg-8">

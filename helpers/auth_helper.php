@@ -179,7 +179,7 @@ function refreshAuthenticatedSession()
     if ($_SESSION['role'] === 'admin' && empty($user->mfa_enabled)) {
         redirect('/auth/mfaSetup', 303);
     }
-    if ($_SESSION['role'] === 'admin' && empty($_SESSION['mfa_verified'])) {
+    if (!empty($user->mfa_enabled) && empty($_SESSION['mfa_verified'])) {
         redirect('/auth/mfa', 303);
     }
     return true;

@@ -58,6 +58,69 @@ class SecurityService
         $this->db->execute();
     }
 
+    public function createTrustedMfaDevice($userId, $sessionVersion)
+    {
+        $token = bin2hex(random_bytes(32));
+        $this->db->query("
+            INSERT INTO mfa_trusted_devices
+                (user_id, token_hash, user_agent_hash, session_version, expires_at, last_used_at)
+            VALUES
+                (:user_id, :token_hash, :user_agent_hash, :session_version, DATE_ADD(NOW(), INTERVAL :ttl SECOND), NOW())
+        ");
+        $this->db->bind(':user_id', (int) $userId);
+        $this->db->bind(':token_hash', hash('sha256', $token));
+        $this->db->bind(':user_agent_hash', $this->userAgentHash());
+        $this->db->bind(':session_version', (int) $sessionVersion);
+        $this->db->bind(':ttl', MFA_REMEMBER_DEVICE_SECONDS);
+        $this->db->execute();
+
+        return (int) $userId . ':' . $token;
+    }
+
+    public function isTrustedMfaDevice($cookieValue, $userId, $sessionVersion)
+    {
+        $parts = explode(':', (string) $cookieValue, 2);
+        if (count($parts) !== 2 || (int) $parts[0] !== (int) $userId || !preg_match('/^[a-f0-9]{64}$/', $parts[1])) {
+            return false;
+        }
+
+        $this->db->query("
+            SELECT id
+            FROM mfa_trusted_devices
+            WHERE user_id = :user_id
+                AND token_hash = :token_hash
+                AND user_agent_hash = :user_agent_hash
+                AND session_version = :session_version
+                AND expires_at > NOW()
+                AND revoked_at IS NULL
+            LIMIT 1
+        ");
+        $this->db->bind(':user_id', (int) $userId);
+        $this->db->bind(':token_hash', hash('sha256', $parts[1]));
+        $this->db->bind(':user_agent_hash', $this->userAgentHash());
+        $this->db->bind(':session_version', (int) $sessionVersion);
+        $device = $this->db->single();
+        if (!$device) {
+            return false;
+        }
+
+        $this->db->query('UPDATE mfa_trusted_devices SET last_used_at = NOW() WHERE id = :id');
+        $this->db->bind(':id', (int) $device->id);
+        $this->db->execute();
+        return true;
+    }
+
+    public function pruneExpiredTrustedMfaDevices()
+    {
+        $this->db->query('DELETE FROM mfa_trusted_devices WHERE expires_at <= NOW() OR revoked_at IS NOT NULL');
+        $this->db->execute();
+    }
+
+    private function userAgentHash()
+    {
+        return hash('sha256', substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500));
+    }
+
     public function audit($eventType, $actorUserId = null, $targetUserId = null, $metadata = [])
     {
         $this->db->query("

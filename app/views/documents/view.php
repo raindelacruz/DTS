@@ -248,26 +248,57 @@ $renderTimelineRemarks = function ($log) use ($document) {
                 <?php endif; ?>
 
                 <?php if (!empty($canDelegateInternally)): ?>
-                    <form action="<?php echo URLROOT; ?>/documents/delegateToStaff/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;">
+                    <form action="<?php echo URLROOT; ?>/documents/delegateToStaff/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-document-staff-delegate-form>
                         <?php echo csrfInput(); ?>
                         <div class="fw-bold mb-3">Delegate to Staff</div>
                         <div class="mb-2">
-                            <label class="form-label small fw-semibold" for="assigned_to_user_id">Staff member</label>
-                            <select id="assigned_to_user_id" name="assigned_to_user_id" class="form-select" required>
-                                <option value="">Select staff</option>
-                                <?php foreach ($divisionStaff as $staff): ?>
-                                    <?php
-                                    $staffName = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? ''));
-                                    ?>
-                                    <option value="<?php echo (int) $staff['id']; ?>"><?php echo htmlspecialchars($staffName); ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <label id="document_delegate_staff_label" class="form-label small fw-semibold">Staff member</label>
+                            <div class="route-multiselect document-staff-multiselect" data-document-staff-multiselect data-route-required>
+                                <button
+                                    type="button"
+                                    class="form-select route-multiselect-toggle text-start"
+                                    aria-labelledby="document_delegate_staff_label"
+                                    aria-expanded="false"
+                                    data-route-multiselect-toggle
+                                >
+                                    <span data-route-multiselect-summary>Select staff</span>
+                                </button>
+                                <div class="route-multiselect-menu d-none" data-route-multiselect-menu>
+                                    <input
+                                        type="search"
+                                        class="form-control route-search-input mb-2"
+                                        placeholder="Search staff"
+                                        aria-label="Search staff"
+                                        data-route-multiselect-search
+                                    >
+                                    <div class="route-checkbox-group route-multiselect-options" role="group" aria-labelledby="document_delegate_staff_label">
+                                        <?php foreach ($divisionStaff as $staff): ?>
+                                            <?php
+                                            $staffId = (int) $staff['id'];
+                                            $staffName = trim(($staff['firstname'] ?? '') . ' ' . (!empty($staff['middle_initial']) ? $staff['middle_initial'] . '. ' : '') . ($staff['lastname'] ?? ''));
+                                            ?>
+                                            <label class="route-checkbox-item" for="document_delegate_staff_<?php echo $staffId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($staffName), ENT_QUOTES, 'UTF-8'); ?>">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    id="document_delegate_staff_<?php echo $staffId; ?>"
+                                                    name="assigned_to_user_ids[]"
+                                                    value="<?php echo $staffId; ?>"
+                                                >
+                                                <span><?php echo htmlspecialchars($staffName); ?></span>
+                                            </label>
+                                        <?php endforeach; ?>
+                                        <div class="route-empty-state d-none" data-route-empty>No staff match your search.</div>
+                                    </div>
+                                </div>
+                                <div class="invalid-feedback" data-route-required-error>Select at least one staff member.</div>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label small fw-semibold" for="internal_instruction">Instruction</label>
                             <textarea id="internal_instruction" name="internal_instruction" class="form-control" rows="3"></textarea>
                         </div>
-                        <button type="submit" class="btn btn-outline-dark w-100" onclick="return confirm('Delegate this document to the selected staff member?');">Delegate to Staff</button>
+                        <button type="submit" class="btn btn-outline-dark w-100">Delegate to Staff</button>
                     </form>
                 <?php endif; ?>
 
@@ -431,5 +462,177 @@ $renderTimelineRemarks = function ($log) use ($document) {
         </div>
     </div>
 <?php endif; ?>
+
+<style>
+    [data-document-staff-delegate-form] {
+        position: relative;
+        z-index: 30;
+    }
+    [data-document-staff-delegate-form]:has(.route-multiselect-menu:not(.d-none)) {
+        z-index: 1400;
+    }
+    .route-multiselect {
+        position: relative;
+    }
+    .route-multiselect-toggle {
+        white-space: normal;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .route-multiselect.is-open {
+        z-index: 1450;
+    }
+    .route-multiselect-menu {
+        position: absolute;
+        z-index: 1450;
+        top: calc(100% + 0.35rem);
+        left: 0;
+        right: 0;
+        padding: 0.65rem;
+        border: 1px solid #dbe4ee;
+        border-radius: 14px;
+        background: #ffffff;
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.14);
+    }
+    .document-staff-multiselect .route-multiselect-options {
+        max-height: 9.9rem;
+        padding: 0.45rem;
+        overflow-y: auto;
+    }
+</style>
+
+<script>
+(() => {
+    const form = document.querySelector('[data-document-staff-delegate-form]');
+    if (!form) {
+        return;
+    }
+
+    const container = form.querySelector('[data-document-staff-multiselect]');
+    const toggle = container ? container.querySelector('[data-route-multiselect-toggle]') : null;
+    const menu = container ? container.querySelector('[data-route-multiselect-menu]') : null;
+    const search = container ? container.querySelector('[data-route-multiselect-search]') : null;
+    const summary = container ? container.querySelector('[data-route-multiselect-summary]') : null;
+    const checks = container ? Array.prototype.slice.call(container.querySelectorAll('input[type="checkbox"]')) : [];
+    const items = container ? Array.prototype.slice.call(container.querySelectorAll('.route-checkbox-item')) : [];
+    const empty = container ? container.querySelector('[data-route-empty]') : null;
+    const error = container ? container.querySelector('[data-route-required-error]') : null;
+
+    function selectedLabels() {
+        return checks
+            .filter((checkbox) => checkbox.checked)
+            .map((checkbox) => {
+                const label = checkbox.closest('.route-checkbox-item');
+                return label ? label.textContent.trim() : '';
+            })
+            .filter(Boolean);
+    }
+
+    function updateSummary() {
+        if (!summary) {
+            return;
+        }
+
+        const labels = selectedLabels();
+        if (labels.length === 0) {
+            summary.textContent = 'Select staff';
+        } else if (labels.length === 1) {
+            summary.textContent = labels[0];
+        } else {
+            summary.textContent = labels.length + ' staff selected';
+        }
+    }
+
+    function filterOptions() {
+        if (!search) {
+            return;
+        }
+
+        const query = search.value.trim().toLowerCase();
+        let visibleCount = 0;
+        items.forEach((item) => {
+            const label = item.getAttribute('data-route-label') || '';
+            const matches = query === '' || label.indexOf(query) !== -1;
+            item.classList.toggle('d-none', !matches);
+            if (matches) {
+                visibleCount++;
+            }
+        });
+        if (empty) {
+            empty.classList.toggle('d-none', visibleCount !== 0);
+        }
+    }
+
+    function setOpen(isOpen) {
+        if (!container || !menu || !toggle) {
+            return;
+        }
+
+        container.classList.toggle('is-open', isOpen);
+        menu.classList.toggle('d-none', !isOpen);
+        toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (isOpen && search) {
+            search.focus();
+            filterOptions();
+        }
+    }
+
+    function showRequiredError() {
+        if (container) {
+            container.classList.add('is-invalid');
+        }
+        if (error) {
+            error.classList.add('d-block');
+        }
+        setOpen(true);
+    }
+
+    if (toggle) {
+        toggle.addEventListener('click', () => {
+            setOpen(toggle.getAttribute('aria-expanded') !== 'true');
+        });
+    }
+    if (search) {
+        search.addEventListener('input', filterOptions);
+    }
+    checks.forEach((checkbox) => {
+        checkbox.addEventListener('change', () => {
+            updateSummary();
+            if (container) {
+                container.classList.remove('is-invalid');
+            }
+            if (error) {
+                error.classList.remove('d-block');
+            }
+        });
+    });
+
+    form.addEventListener('submit', (event) => {
+        if (!checks.some((checkbox) => checkbox.checked)) {
+            event.preventDefault();
+            showRequiredError();
+            return;
+        }
+
+        if (!confirm('Delegate this document to the selected staff member(s)?')) {
+            event.preventDefault();
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (container && !container.contains(event.target)) {
+            setOpen(false);
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            setOpen(false);
+        }
+    });
+
+    updateSummary();
+    filterOptions();
+})();
+</script>
 
 <?php require_once '../app/views/layout/footer.php'; ?>

@@ -64,6 +64,8 @@ define('LOGIN_MAX_ATTEMPTS', max(3, (int) (getenv('LOGIN_MAX_ATTEMPTS') ?: 5)));
 define('LOGIN_LOCKOUT_SECONDS', max(60, (int) (getenv('LOGIN_LOCKOUT_SECONDS') ?: 900)));
 define('SESSION_IDLE_TIMEOUT_SECONDS', max(300, (int) (getenv('SESSION_IDLE_TIMEOUT_SECONDS') ?: 1800)));
 define('SESSION_ABSOLUTE_TIMEOUT_SECONDS', max(1800, (int) (getenv('SESSION_ABSOLUTE_TIMEOUT_SECONDS') ?: 43200)));
+define('MFA_REMEMBER_DEVICE_SECONDS', max(86400, (int) (getenv('MFA_REMEMBER_DEVICE_SECONDS') ?: 2592000)));
+define('MFA_TRUSTED_DEVICE_COOKIE', 'dts_mfa_trusted_device');
 define('TRUSTED_PROXIES', array_values(array_filter(array_map('trim', explode(',', (string) (getenv('TRUSTED_PROXIES') ?: ''))))));
 define('REQUIRE_MALWARE_SCAN', filter_var(getenv('REQUIRE_MALWARE_SCAN') ?: '0', FILTER_VALIDATE_BOOLEAN));
 define('MALWARE_SCAN_COMMAND', trim((string) (getenv('MALWARE_SCAN_COMMAND') ?: '')));

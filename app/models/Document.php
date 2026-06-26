@@ -2552,14 +2552,24 @@ class Document
         }
     }
 
-    public function assignDocumentInternally($document_id, $assigned_to_user_id, $assigned_by_user_id, $department_id, $instructions = '')
+    public function assignDocumentInternallyToStaff($document_id, $assigned_to_user_ids, $assigned_by_user_id, $department_id, $instructions = '')
     {
+        $assignedToUserIds = array_values(array_unique(array_filter(array_map('intval', (array) $assigned_to_user_ids))));
+
+        if (empty($assignedToUserIds)) {
+            throw new Exception('Select active staff members under your division.');
+        }
+
         try {
             $this->db->beginTransaction();
 
-            $assignee = $this->findActiveStaffInDepartment($assigned_to_user_id, $department_id);
-            if (!$assignee) {
-                throw new Exception('Select an active staff member from your division.');
+            $assignees = [];
+            foreach ($assignedToUserIds as $staffId) {
+                $assignee = $this->findActiveStaffInDepartment($staffId, $department_id);
+                if (!$assignee) {
+                    throw new Exception('Select active staff members under your division.');
+                }
+                $assignees[$staffId] = $assignee;
             }
 
             $cancelExisting = $this->db->prepare("
@@ -2598,17 +2608,25 @@ class Document
                 )
             ");
 
-            $insert->execute([
-                'document_id' => (int) $document_id,
-                'assigned_by_user_id' => (int) $assigned_by_user_id,
-                'assigned_by_department_id' => (int) $department_id,
-                'assigned_to_user_id' => (int) $assigned_to_user_id,
-                'assigned_to_department_id' => (int) $department_id,
-                'instructions' => trim((string) $instructions) !== '' ? trim((string) $instructions) : null
-            ]);
+            $assignmentIds = [];
+            foreach ($assignedToUserIds as $staffId) {
+                $insert->execute([
+                    'document_id' => (int) $document_id,
+                    'assigned_by_user_id' => (int) $assigned_by_user_id,
+                    'assigned_by_department_id' => (int) $department_id,
+                    'assigned_to_user_id' => (int) $staffId,
+                    'assigned_to_department_id' => (int) $department_id,
+                    'instructions' => trim((string) $instructions) !== '' ? trim((string) $instructions) : null
+                ]);
+                $assignmentIds[] = (int) $this->db->lastInsertId();
+            }
 
-            $assignmentId = (int) $this->db->lastInsertId();
-            $remarks = 'Assigned to ' . $this->formatUserName($assignee);
+            $assigneeNames = array_map(function ($assignee) {
+                return $this->formatUserName($assignee);
+            }, array_values($assignees));
+            $remarks = count($assigneeNames) === 1
+                ? 'Assigned to ' . $assigneeNames[0]
+                : 'Assigned to ' . count($assigneeNames) . ' staff members: ' . implode(', ', $assigneeNames);
             $instructions = trim((string) $instructions);
             if ($instructions !== '') {
                 $remarks .= "\nInstruction: " . $instructions;
@@ -2623,13 +2641,29 @@ class Document
             );
 
             $this->db->commit();
-            return $assignmentId;
+            return [
+                'assignment_ids' => $assignmentIds,
+                'assignees' => array_values($assignees)
+            ];
         } catch (Exception $e) {
             if ($this->db->inTransaction()) {
                 $this->db->rollBack();
             }
             throw $e;
         }
+    }
+
+    public function assignDocumentInternally($document_id, $assigned_to_user_id, $assigned_by_user_id, $department_id, $instructions = '')
+    {
+        $result = $this->assignDocumentInternallyToStaff(
+            $document_id,
+            [(int) $assigned_to_user_id],
+            $assigned_by_user_id,
+            $department_id,
+            $instructions
+        );
+
+        return (int) ($result['assignment_ids'][0] ?? 0);
     }
 
     public function completeInternalAssignment($document_id, $user_id, $department_id, $remarks = '')
