@@ -1,13 +1,13 @@
 <?php
 
-if (!class_exists('TCPDF2DBarcode')) {
-    throw new RuntimeException('Managed PDF dependencies are not installed. Run composer install.');
-}
-
 class QrCodeService
 {
     public static function generateSvgMarkup($text, $moduleSize = 4)
     {
+        if (!class_exists('TCPDF2DBarcode')) {
+            throw new RuntimeException('QR/PDF dependencies are not installed. Run composer install.');
+        }
+
         $barcode = new TCPDF2DBarcode((string) $text, 'QRCODE,M');
         return $barcode->getBarcodeSVGcode((int) $moduleSize, (int) $moduleSize, '#111827');
     }
