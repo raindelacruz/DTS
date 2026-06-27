@@ -66,6 +66,13 @@ define('SESSION_IDLE_TIMEOUT_SECONDS', max(300, (int) (getenv('SESSION_IDLE_TIME
 define('SESSION_ABSOLUTE_TIMEOUT_SECONDS', max(1800, (int) (getenv('SESSION_ABSOLUTE_TIMEOUT_SECONDS') ?: 43200)));
 define('MFA_REMEMBER_DEVICE_SECONDS', max(86400, (int) (getenv('MFA_REMEMBER_DEVICE_SECONDS') ?: 2592000)));
 define('MFA_TRUSTED_DEVICE_COOKIE', 'dts_mfa_trusted_device');
+$configuredCookiePath = trim((string) (getenv('APP_COOKIE_PATH') ?: '/'));
+if ($configuredCookiePath === '' || $configuredCookiePath === '/') {
+    $configuredCookiePath = '/';
+} else {
+    $configuredCookiePath = '/' . trim($configuredCookiePath, '/') . '/';
+}
+define('APP_COOKIE_PATH', $configuredCookiePath);
 define('TRUSTED_PROXIES', array_values(array_filter(array_map('trim', explode(',', (string) (getenv('TRUSTED_PROXIES') ?: ''))))));
 define('REQUIRE_MALWARE_SCAN', filter_var(getenv('REQUIRE_MALWARE_SCAN') ?: '0', FILTER_VALIDATE_BOOLEAN));
 define('MALWARE_SCAN_COMMAND', trim((string) (getenv('MALWARE_SCAN_COMMAND') ?: '')));

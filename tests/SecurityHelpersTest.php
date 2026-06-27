@@ -19,6 +19,12 @@ return [
         test_assert(!isSafeRedirectTarget('https://evil.example.test'));
     },
 
+    'application cookies default to root path' => function ($root) {
+        require_once $root . '/app/init.php';
+
+        test_assert_same('/', APP_COOKIE_PATH, 'MFA trusted-device cookies must be sent on root-routed production URLs.');
+    },
+
     'sensitive value encryption round trips' => function ($root) {
         require_once $root . '/app/init.php';
 

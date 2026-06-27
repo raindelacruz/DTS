@@ -14,10 +14,9 @@ if (isSecureRequest()) {
 }
 
 session_name('DTSSESSID');
-$sessionCookiePath = parse_url(URLROOT, PHP_URL_PATH) ?: '/';
 session_set_cookie_params([
     'lifetime' => 0,
-    'path' => rtrim($sessionCookiePath, '/') . '/',
+    'path' => APP_COOKIE_PATH,
     'domain' => '',
     'secure' => isSecureRequest(),
     'httponly' => true,

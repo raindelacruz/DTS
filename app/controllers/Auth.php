@@ -361,10 +361,9 @@ class Auth extends Controller
 
     private function trustedMfaCookieOptions($expires)
     {
-        $path = parse_url(URLROOT, PHP_URL_PATH) ?: '/';
         return [
             'expires' => (int) $expires,
-            'path' => $path === '' ? '/' : $path,
+            'path' => APP_COOKIE_PATH,
             'secure' => isSecureRequest(),
             'httponly' => true,
             'samesite' => 'Lax'
