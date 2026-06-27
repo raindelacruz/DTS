@@ -373,9 +373,15 @@ class Auth extends Controller
 
     private function rememberMfaDevice($user)
     {
-        $sessionVersion = $this->users()->currentSessionVersion((int) $user->id);
-        $cookieValue = $this->security()->createTrustedMfaDevice((int) $user->id, $sessionVersion);
-        setcookie(MFA_TRUSTED_DEVICE_COOKIE, $cookieValue, $this->trustedMfaCookieOptions(time() + MFA_REMEMBER_DEVICE_SECONDS));
+        try {
+            $sessionVersion = $this->users()->currentSessionVersion((int) $user->id);
+            $cookieValue = $this->security()->createTrustedMfaDevice((int) $user->id, $sessionVersion);
+            setcookie(MFA_TRUSTED_DEVICE_COOKIE, $cookieValue, $this->trustedMfaCookieOptions(time() + MFA_REMEMBER_DEVICE_SECONDS));
+            return true;
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'auth.rememberMfaDevice', 'user_id' => (int) $user->id]);
+            return false;
+        }
     }
 
     private function hasTrustedMfaDevice($user)
@@ -419,6 +425,30 @@ class Auth extends Controller
         }
 
         return @mail($email, $subject, $body, implode("\r\n", $headerLines));
+    }
+
+    private function logDevelopmentPasswordResetUrl($email, $resetUrl)
+    {
+        if (APP_ENV === 'production') {
+            return;
+        }
+
+        $logDir = dirname(__DIR__, 2) . '/storage/logs';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0775, true);
+        }
+
+        $line = sprintf(
+            "[%s] %s %s%s",
+            date('Y-m-d H:i:s'),
+            hash('sha256', strtolower(trim((string) $email))),
+            $resetUrl,
+            PHP_EOL
+        );
+
+        if (@file_put_contents($logDir . '/password_resets.log', $line, FILE_APPEND | LOCK_EX) === false) {
+            appLog('error', 'Development password reset URL could not be written.');
+        }
     }
 
     private function sendSmtpMessage($to, $subject, $body, $headers)
@@ -540,6 +570,9 @@ class Auth extends Controller
                 redirect('/dashboard', 303);
             } catch (ValidationException $e) {
                 $error = $e->getMessage();
+            } catch (Throwable $e) {
+                reportException($e, ['action' => 'auth.mfaSetup', 'user_id' => (int) $user->id]);
+                $error = 'MFA setup could not be completed right now. Please try again.';
             }
         }
         $provisioningUri = TotpService::provisioningUri($secret, $user->email ?: $user->id_number, SITENAME);
@@ -580,6 +613,9 @@ class Auth extends Controller
                 redirect('/dashboard', 303);
             } catch (ValidationException $e) {
                 $error = $e->getMessage();
+            } catch (Throwable $e) {
+                reportException($e, ['action' => 'auth.mfa', 'user_id' => (int) $user->id]);
+                $error = 'Two-factor verification could not be completed right now. Please try again.';
             }
         }
         require_once APPROOT . '/views/auth/mfa.php';
@@ -588,6 +624,7 @@ class Auth extends Controller
     public function forgotPassword()
     {
         $message = '';
+        $developmentResetUrl = '';
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             validateCsrfOrFail();
             $email = strtolower(trim($_POST['email'] ?? ''));
@@ -600,6 +637,10 @@ class Auth extends Controller
                     $delivered = $this->sendPasswordResetInstructions($email, $resetUrl);
                 } catch (Throwable $e) {
                     reportException($e, ['action' => 'auth.forgotPassword.mail', 'user_id' => $user->id, 'email_hash' => hash('sha256', $email)]);
+                }
+                if (APP_ENV !== 'production') {
+                    $this->logDevelopmentPasswordResetUrl($email, $resetUrl);
+                    $developmentResetUrl = $resetUrl;
                 }
                 securityAudit('password_reset_requested', null, (int) $user->id, [
                     'mail_accepted' => (bool) $delivered,
