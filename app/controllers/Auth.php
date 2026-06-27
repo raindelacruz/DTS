@@ -13,10 +13,38 @@ class Auth extends Controller
 
     public function __construct()
     {
-        $this->userModel = new User();
-        $this->departmentModel = new Department();
-        $this->notificationModel = new Notification();
-        $this->securityService = new SecurityService();
+    }
+
+    private function users()
+    {
+        if (!$this->userModel) {
+            $this->userModel = new User();
+        }
+        return $this->userModel;
+    }
+
+    private function departments()
+    {
+        if (!$this->departmentModel) {
+            $this->departmentModel = new Department();
+        }
+        return $this->departmentModel;
+    }
+
+    private function notifications()
+    {
+        if (!$this->notificationModel) {
+            $this->notificationModel = new Notification();
+        }
+        return $this->notificationModel;
+    }
+
+    private function security()
+    {
+        if (!$this->securityService) {
+            $this->securityService = new SecurityService();
+        }
+        return $this->securityService;
     }
 
     public function index()
@@ -71,17 +99,17 @@ class Auth extends Controller
                 }
 
                 $ipAddress = clientIpAddress();
-                if ($this->securityService->isLoginBlocked($values['id_number'], $ipAddress)) {
+                if ($this->security()->isLoginBlocked($values['id_number'], $ipAddress)) {
                     securityAudit('login_blocked', null, null, ['identifier_hash' => hash('sha256', strtolower($values['id_number']))]);
                     throw new ValidationException('Too many sign-in attempts. Please try again later.', [
                         '_global' => 'Too many sign-in attempts. Please try again later.'
                     ]);
                 }
 
-                $user = $this->userModel->login($values['id_number'], $password);
+                $user = $this->users()->login($values['id_number'], $password);
 
                 if (!$user) {
-                    $this->securityService->recordLoginFailure($values['id_number'], $ipAddress);
+                    $this->security()->recordLoginFailure($values['id_number'], $ipAddress);
                     securityAudit('login_failed', null, null, ['identifier_hash' => hash('sha256', strtolower($values['id_number']))]);
                     throw new ValidationException('Invalid credentials.', [
                         '_global' => 'The ID number or password you entered is incorrect.'
@@ -89,16 +117,16 @@ class Auth extends Controller
                 }
 
                 if (($user->status ?? 'inactive') !== 'active') {
-                    $this->securityService->recordLoginFailure($values['id_number'], $ipAddress);
+                    $this->security()->recordLoginFailure($values['id_number'], $ipAddress);
                     securityAudit('inactive_account_login', null, (int) $user->id);
                     throw new ValidationException('Your account is inactive.', [
                         '_global' => 'Your account is inactive. Please wait for administrator verification.'
                     ]);
                 }
 
-                $this->securityService->clearLoginFailures($values['id_number'], $ipAddress);
+                $this->security()->clearLoginFailures($values['id_number'], $ipAddress);
                 $this->beginAuthenticatedSession($user);
-                $this->userModel->markLoginSuccessful((int) $user->id);
+                $this->users()->markLoginSuccessful((int) $user->id);
                 securityAudit('login_succeeded', (int) $user->id, (int) $user->id);
 
                 if (($user->role ?? '') === 'admin' && empty($user->mfa_enabled)) {
@@ -190,11 +218,11 @@ class Auth extends Controller
                     $errors['confirm_password'] = 'Passwords do not match.';
                 }
 
-                if ($values['id_number'] !== '' && $this->userModel->findByIdNumber($values['id_number'])) {
+                if ($values['id_number'] !== '' && $this->users()->findByIdNumber($values['id_number'])) {
                     $errors['id_number'] = 'ID number is already registered.';
                 }
 
-                if ($values['email'] !== '' && filter_var($values['email'], FILTER_VALIDATE_EMAIL) && $this->userModel->emailExistsForOtherUser($values['email'], 0)) {
+                if ($values['email'] !== '' && filter_var($values['email'], FILTER_VALIDATE_EMAIL) && $this->users()->emailExistsForOtherUser($values['email'], 0)) {
                     $errors['email'] = 'Email address is already registered.';
                 }
 
@@ -202,7 +230,7 @@ class Auth extends Controller
                     throw new ValidationException('Please correct the highlighted fields.', $errors);
                 }
 
-                $this->userModel->register([
+                $this->users()->register([
                     'id_number' => $values['id_number'],
                     'firstname' => $values['firstname'],
                     'lastname' => $values['lastname'],
@@ -213,10 +241,10 @@ class Auth extends Controller
                     'status' => 'inactive'
                 ]);
 
-                $registeredUser = $this->userModel->findByIdNumber($values['id_number']);
+                $registeredUser = $this->users()->findByIdNumber($values['id_number']);
                 securityAudit('account_registered', null, $registeredUser ? (int) $registeredUser->id : null);
 
-                $this->notificationModel->notifyAdmins(
+                $this->notifications()->notifyAdmins(
                     'New registration',
                     $values['firstname'] . ' ' . $values['lastname'] . ' submitted a registration request.',
                     '/users'
@@ -240,7 +268,7 @@ class Auth extends Controller
             'values' => $state['values'],
             'errors' => $state['errors'],
             'message' => $state['message'],
-            'departments' => $this->departmentModel->getAll()
+            'departments' => $this->departments()->getAll()
         ];
 
         $this->view('auth/register', $data);
@@ -300,8 +328,8 @@ class Auth extends Controller
 
     private function rememberMfaDevice($user)
     {
-        $sessionVersion = $this->userModel->currentSessionVersion((int) $user->id);
-        $cookieValue = $this->securityService->createTrustedMfaDevice((int) $user->id, $sessionVersion);
+        $sessionVersion = $this->users()->currentSessionVersion((int) $user->id);
+        $cookieValue = $this->security()->createTrustedMfaDevice((int) $user->id, $sessionVersion);
         setcookie(MFA_TRUSTED_DEVICE_COOKIE, $cookieValue, $this->trustedMfaCookieOptions(time() + MFA_REMEMBER_DEVICE_SECONDS));
     }
 
@@ -311,7 +339,7 @@ class Auth extends Controller
         if ($cookieValue === '') {
             return false;
         }
-        return $this->securityService->isTrustedMfaDevice($cookieValue, (int) $user->id, (int) ($user->session_version ?? 0));
+        return $this->security()->isTrustedMfaDevice($cookieValue, (int) $user->id, (int) ($user->session_version ?? 0));
     }
 
     private function passwordResetHeaders()
@@ -431,7 +459,7 @@ class Auth extends Controller
 
     public function mfaSetup()
     {
-        $user = !empty($_SESSION['user_id']) ? $this->userModel->findById((int) $_SESSION['user_id']) : null;
+        $user = !empty($_SESSION['user_id']) ? $this->users()->findById((int) $_SESSION['user_id']) : null;
         if (!$user || ($user->status ?? '') !== 'active') {
             clearAuthenticatedSession();
             redirect('/auth/login', 303);
@@ -450,8 +478,8 @@ class Auth extends Controller
                 if (!TotpService::verify($secret, $_POST['code'] ?? '')) {
                     throw new ValidationException('The verification code is invalid.');
                 }
-                $this->userModel->configureMfa((int) $user->id, encryptSensitiveValue($secret));
-                $_SESSION['session_version'] = $this->userModel->currentSessionVersion((int) $user->id);
+                $this->users()->configureMfa((int) $user->id, encryptSensitiveValue($secret));
+                $_SESSION['session_version'] = $this->users()->currentSessionVersion((int) $user->id);
                 $_SESSION['mfa_verified'] = true;
                 if (!empty($_POST['remember_device'])) {
                     $user->session_version = $_SESSION['session_version'];
@@ -477,7 +505,7 @@ class Auth extends Controller
 
     public function mfa()
     {
-        $user = !empty($_SESSION['user_id']) ? $this->userModel->findById((int) $_SESSION['user_id']) : null;
+        $user = !empty($_SESSION['user_id']) ? $this->users()->findById((int) $_SESSION['user_id']) : null;
         if (!$user || ($user->status ?? '') !== 'active' || empty($user->mfa_enabled)) {
             clearAuthenticatedSession();
             redirect('/auth/login', 303);
@@ -513,9 +541,9 @@ class Auth extends Controller
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             validateCsrfOrFail();
             $email = strtolower(trim($_POST['email'] ?? ''));
-            $user = filter_var($email, FILTER_VALIDATE_EMAIL) ? $this->userModel->findByEmail($email) : null;
+            $user = filter_var($email, FILTER_VALIDATE_EMAIL) ? $this->users()->findByEmail($email) : null;
             if ($user && ($user->status ?? '') === 'active') {
-                $token = $this->securityService->createPasswordReset((int) $user->id);
+                $token = $this->security()->createPasswordReset((int) $user->id);
                 $resetUrl = buildUrl('/auth/resetPassword/' . rawurlencode($token));
                 $delivered = false;
                 try {
@@ -535,7 +563,7 @@ class Auth extends Controller
 
     public function resetPassword($token = '')
     {
-        $reset = $this->securityService->findValidPasswordReset((string) $token);
+        $reset = $this->security()->findValidPasswordReset((string) $token);
         $error = '';
         if (!$reset) {
             $error = 'This password-reset link is invalid or expired.';
@@ -551,8 +579,8 @@ class Auth extends Controller
                 if (!hash_equals($password, $confirmation)) {
                     throw new ValidationException('Password confirmation does not match.');
                 }
-                $this->userModel->updatePassword((int) $reset->user_id, $password);
-                $this->securityService->consumePasswordReset((int) $reset->id);
+                $this->users()->updatePassword((int) $reset->user_id, $password);
+                $this->security()->consumePasswordReset((int) $reset->id);
                 securityAudit('password_reset_completed', (int) $reset->user_id, (int) $reset->user_id);
                 flash('auth_success', 'Your password has been reset. You can now sign in.', 'success');
                 redirect('/auth/login', 303);
