@@ -71,6 +71,11 @@ define('REQUIRE_MALWARE_SCAN', filter_var(getenv('REQUIRE_MALWARE_SCAN') ?: '0',
 define('MALWARE_SCAN_COMMAND', trim((string) (getenv('MALWARE_SCAN_COMMAND') ?: '')));
 define('UPLOAD_STORAGE_QUOTA_MB', max(100, (int) (getenv('UPLOAD_STORAGE_QUOTA_MB') ?: 10240)));
 define('PASSWORD_RESET_FROM', trim((string) (getenv('PASSWORD_RESET_FROM') ?: 'no-reply@localhost')));
+define('SMTP_HOST', trim((string) (getenv('SMTP_HOST') ?: '')));
+define('SMTP_PORT', max(1, (int) (getenv('SMTP_PORT') ?: 587)));
+define('SMTP_USER', trim((string) (getenv('SMTP_USER') ?: '')));
+define('SMTP_PASS', (string) (getenv('SMTP_PASS') ?: ''));
+define('SMTP_ENCRYPTION', strtolower(trim((string) (getenv('SMTP_ENCRYPTION') ?: 'tls'))));
 define('APP_KEY', (string) (getenv('APP_KEY') ?: 'development-only-key-change-me'));
 
 if (APP_ENV === 'production' && (!REQUIRE_MALWARE_SCAN || MALWARE_SCAN_COMMAND === '')) {

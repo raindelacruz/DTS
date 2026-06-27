@@ -5,6 +5,13 @@ class QrCodeService
     public static function generateSvgMarkup($text, $moduleSize = 4)
     {
         if (!class_exists('TCPDF2DBarcode')) {
+            $barcodeFile = dirname(__DIR__, 2) . '/vendor/tecnickcom/tcpdf/tcpdf_barcodes_2d.php';
+            if (is_file($barcodeFile)) {
+                require_once $barcodeFile;
+            }
+        }
+
+        if (!class_exists('TCPDF2DBarcode')) {
             throw new RuntimeException('QR/PDF dependencies are not installed. Run composer install.');
         }
 

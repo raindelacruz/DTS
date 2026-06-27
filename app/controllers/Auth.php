@@ -314,6 +314,121 @@ class Auth extends Controller
         return $this->securityService->isTrustedMfaDevice($cookieValue, (int) $user->id, (int) ($user->session_version ?? 0));
     }
 
+    private function passwordResetHeaders()
+    {
+        $from = PASSWORD_RESET_FROM !== '' ? PASSWORD_RESET_FROM : 'no-reply@localhost';
+        return [
+            'From' => $from,
+            'Reply-To' => $from,
+            'MIME-Version' => '1.0',
+            'Content-Type' => 'text/plain; charset=UTF-8'
+        ];
+    }
+
+    private function sendPasswordResetInstructions($email, $resetUrl)
+    {
+        $subject = SITENAME . ' password reset';
+        $body = "Use this link within 30 minutes to reset your password:\n\n" . $resetUrl;
+        $headers = $this->passwordResetHeaders();
+
+        if (SMTP_HOST !== '') {
+            return $this->sendSmtpMessage($email, $subject, $body, $headers);
+        }
+
+        $headerLines = [];
+        foreach ($headers as $name => $value) {
+            $headerLines[] = $name . ': ' . $value;
+        }
+
+        return @mail($email, $subject, $body, implode("\r\n", $headerLines));
+    }
+
+    private function sendSmtpMessage($to, $subject, $body, $headers)
+    {
+        $host = SMTP_HOST;
+        $port = SMTP_PORT;
+        $target = (SMTP_ENCRYPTION === 'ssl' ? 'ssl://' : '') . $host . ':' . $port;
+        $socket = @stream_socket_client($target, $errno, $errstr, 20, STREAM_CLIENT_CONNECT);
+        if (!$socket) {
+            throw new RuntimeException('SMTP connection failed: ' . $errstr);
+        }
+
+        stream_set_timeout($socket, 20);
+        try {
+            $this->smtpExpect($socket, [220]);
+            $this->smtpCommand($socket, 'EHLO ' . (parse_url(URLROOT, PHP_URL_HOST) ?: 'localhost'), [250]);
+            if (SMTP_ENCRYPTION === 'tls') {
+                $this->smtpCommand($socket, 'STARTTLS', [220]);
+                if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                    throw new RuntimeException('SMTP TLS negotiation failed.');
+                }
+                $this->smtpCommand($socket, 'EHLO ' . (parse_url(URLROOT, PHP_URL_HOST) ?: 'localhost'), [250]);
+            }
+            if (SMTP_USER !== '') {
+                $this->smtpCommand($socket, 'AUTH LOGIN', [334]);
+                $this->smtpCommand($socket, base64_encode(SMTP_USER), [334]);
+                $this->smtpCommand($socket, base64_encode(SMTP_PASS), [235]);
+            }
+
+            $from = $headers['From'] ?? PASSWORD_RESET_FROM;
+            $this->smtpCommand($socket, 'MAIL FROM:<' . $this->smtpAddress($from) . '>', [250]);
+            $this->smtpCommand($socket, 'RCPT TO:<' . $this->smtpAddress($to) . '>', [250, 251]);
+            $this->smtpCommand($socket, 'DATA', [354]);
+
+            $messageHeaders = array_merge($headers, [
+                'To' => $to,
+                'Subject' => $subject,
+                'Date' => date(DATE_RFC2822)
+            ]);
+            $lines = [];
+            foreach ($messageHeaders as $name => $value) {
+                $lines[] = $name . ': ' . str_replace(["\r", "\n"], '', (string) $value);
+            }
+            $message = implode("\r\n", $lines) . "\r\n\r\n" . str_replace("\n.", "\n..", str_replace(["\r\n", "\r"], "\n", $body));
+            fwrite($socket, str_replace("\n", "\r\n", $message) . "\r\n.\r\n");
+            $this->smtpExpect($socket, [250]);
+            $this->smtpCommand($socket, 'QUIT', [221]);
+            fclose($socket);
+            return true;
+        } catch (Throwable $e) {
+            fclose($socket);
+            throw $e;
+        }
+    }
+
+    private function smtpAddress($address)
+    {
+        if (preg_match('/<([^>]+)>/', (string) $address, $matches)) {
+            return trim($matches[1]);
+        }
+        return trim((string) $address);
+    }
+
+    private function smtpCommand($socket, $command, $expectedCodes)
+    {
+        fwrite($socket, $command . "\r\n");
+        return $this->smtpExpect($socket, $expectedCodes);
+    }
+
+    private function smtpExpect($socket, $expectedCodes)
+    {
+        $response = '';
+        do {
+            $line = fgets($socket, 515);
+            if ($line === false) {
+                throw new RuntimeException('SMTP server did not respond.');
+            }
+            $response .= $line;
+        } while (isset($line[3]) && $line[3] === '-');
+
+        $code = (int) substr($response, 0, 3);
+        if (!in_array($code, $expectedCodes, true)) {
+            throw new RuntimeException('SMTP command failed: ' . trim($response));
+        }
+
+        return $response;
+    }
+
     public function mfaSetup()
     {
         $user = !empty($_SESSION['user_id']) ? $this->userModel->findById((int) $_SESSION['user_id']) : null;
@@ -350,7 +465,12 @@ class Auth extends Controller
             }
         }
         $provisioningUri = TotpService::provisioningUri($secret, $user->email ?: $user->id_number, SITENAME);
-        $qrCodeDataUri = QrCodeService::generateSvgDataUri($provisioningUri, 5);
+        $qrCodeDataUri = '';
+        try {
+            $qrCodeDataUri = QrCodeService::generateSvgDataUri($provisioningUri, 5);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'auth.mfaSetup.qr', 'user_id' => $user->id]);
+        }
         $rememberDeviceDays = (int) ceil(MFA_REMEMBER_DEVICE_SECONDS / 86400);
         require_once '../app/views/auth/mfa_setup.php';
     }
@@ -397,8 +517,16 @@ class Auth extends Controller
             if ($user && ($user->status ?? '') === 'active') {
                 $token = $this->securityService->createPasswordReset((int) $user->id);
                 $resetUrl = buildUrl('/auth/resetPassword/' . rawurlencode($token));
-                $delivered = @mail($email, SITENAME . ' password reset', "Use this link within 30 minutes to reset your password:\n\n" . $resetUrl, 'From: ' . PASSWORD_RESET_FROM);
-                securityAudit('password_reset_requested', null, (int) $user->id, ['mail_accepted' => (bool) $delivered]);
+                $delivered = false;
+                try {
+                    $delivered = $this->sendPasswordResetInstructions($email, $resetUrl);
+                } catch (Throwable $e) {
+                    reportException($e, ['action' => 'auth.forgotPassword.mail', 'user_id' => $user->id, 'email_hash' => hash('sha256', $email)]);
+                }
+                securityAudit('password_reset_requested', null, (int) $user->id, [
+                    'mail_accepted' => (bool) $delivered,
+                    'transport' => SMTP_HOST !== '' ? 'smtp' : 'mail'
+                ]);
             }
             $message = 'If the address belongs to an active account, password-reset instructions have been sent.';
         }

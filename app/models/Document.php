@@ -481,12 +481,12 @@ class Document
     {
         return "
             (
-                d.origin_department_id = :dept
+                d.origin_department_id = :visibility_dept_origin
                 OR EXISTS (
                     SELECT 1
                     FROM document_logs l
                     WHERE l.document_id = d.id
-                    AND l.department_id = :dept
+                    AND l.department_id = :visibility_dept_log
                 )
                 OR (
                     d.status NOT IN ('Draft', 'Cancelled')
@@ -495,7 +495,7 @@ class Document
                             SELECT 1
                             FROM document_routes r_thru
                             WHERE r_thru.document_id = d.id
-                            AND r_thru.to_department_id = :dept
+                            AND r_thru.to_department_id = :visibility_dept_thru
                             AND r_thru.routing_type = 'THRU'
                         )
                         OR (
@@ -503,7 +503,7 @@ class Document
                                 SELECT 1
                                 FROM document_routes r_target
                                 WHERE r_target.document_id = d.id
-                                AND r_target.to_department_id = :dept
+                                AND r_target.to_department_id = :visibility_dept_target
                                 AND r_target.routing_type IN ('TO','CC','DELEGATE')
                             )
                             AND (
@@ -528,12 +528,24 @@ class Document
                                 FROM document_routes r_legacy
                                 WHERE r_legacy.document_id = d.id
                             )
-                            AND d.destination_department_id = :dept
+                            AND d.destination_department_id = :visibility_dept_destination
                         )
                     )
                 )
             )
         ";
+    }
+
+    private function visibilityParams($departmentId)
+    {
+        $departmentId = (int) $departmentId;
+        return [
+            'visibility_dept_origin' => $departmentId,
+            'visibility_dept_log' => $departmentId,
+            'visibility_dept_thru' => $departmentId,
+            'visibility_dept_target' => $departmentId,
+            'visibility_dept_destination' => $departmentId
+        ];
     }
 
     public function canDepartmentViewDocument($documentId, $departmentId)
@@ -545,10 +557,7 @@ class Document
             AND " . $this->visibilityWhereClause();
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([
-            'document_id' => $documentId,
-            'dept' => $departmentId
-        ]);
+        $stmt->execute(array_merge(['document_id' => $documentId], $this->visibilityParams($departmentId)));
 
         return (int) $stmt->fetchColumn() > 0;
     }
@@ -1849,7 +1858,7 @@ class Document
         } else {
             $from = 'FROM documents d';
             $where = 'WHERE ' . $this->visibilityWhereClause();
-            $params['dept'] = $departmentId;
+            $params = array_merge($params, $this->visibilityParams($departmentId));
         }
 
         $where .= $this->buildDocumentFilterClause($filters, $params);
@@ -1910,7 +1919,7 @@ class Document
         ";
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute(['dept' => $department_id]);
+        $stmt->execute($this->visibilityParams($department_id));
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -1943,7 +1952,7 @@ class Document
             WHERE " . $this->visibilityWhereClause();
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute(['dept' => $department_id]);
+        $stmt->execute($this->visibilityParams($department_id));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row['total'];
     }
@@ -1970,7 +1979,7 @@ class Document
             FROM documents d
             WHERE " . $this->visibilityWhereClause();
 
-        $params = ['dept' => $department_id];
+        $params = $this->visibilityParams($department_id);
 
         $keyword = trim($filters['keyword'] ?? '');
         $status = trim($filters['status'] ?? '');
@@ -2034,7 +2043,7 @@ class Document
         ";
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute(['dept' => $department_id]);
+        $stmt->execute($this->visibilityParams($department_id));
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 

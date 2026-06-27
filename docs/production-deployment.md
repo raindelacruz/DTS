@@ -18,9 +18,10 @@ Set these values in the service or Apache virtual-host environment:
 - `REQUIRE_MALWARE_SCAN=1`
 - `MALWARE_SCAN_COMMAND` to the approved scanner command, for example `clamdscan --no-summary --fdpass`
 - `PASSWORD_RESET_FROM` to the approved sender address
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_ENCRYPTION` when the production server should send password-reset email through an authenticated SMTP relay. `SMTP_ENCRYPTION` accepts `tls` or `ssl`.
 - `UPLOAD_STORAGE_QUOTA_MB` to the attachment storage allocation
 
-Configure PHP email delivery so `mail()` sends through the organization's approved relay. Password-reset responses are intentionally generic and tokens expire after 30 minutes.
+Configure either the SMTP environment values above or PHP email delivery so `mail()` sends through the organization's approved relay. Password-reset responses are intentionally generic and tokens expire after 30 minutes.
 
 Install and enable PHP `fileinfo`, `openssl`, `PDO MySQL`, and `zip`. The ZIP extension is required to validate DOCX and XLSX containers.
 
