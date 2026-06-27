@@ -633,16 +633,17 @@ class Document
             JOIN departments from_dept ON r.from_department_id = from_dept.id
             JOIN departments to_dept ON r.to_department_id = to_dept.id
             WHERE r.document_id = :document_id
-            AND r.from_department_id = :department_id
+            AND r.from_department_id = :from_department_id
             AND r.routing_type = 'DELEGATE'
-            AND to_dept.parent_id = :department_id
+            AND to_dept.parent_id = :parent_department_id
             ORDER BY r.id DESC
             LIMIT 1
         ");
 
         $stmt->execute([
             'document_id' => $documentId,
-            'department_id' => $departmentId
+            'from_department_id' => $departmentId,
+            'parent_department_id' => $departmentId
         ]);
 
         $route = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1697,7 +1698,7 @@ class Document
             FROM documents d
             LEFT JOIN document_routes r
                 ON d.id = r.document_id
-                AND r.to_department_id = :department_id
+                AND r.to_department_id = :route_department_id
             WHERE d.status IN ('Released', 'Re-released', 'Received')
             AND (
                 (r.routing_type = 'THRU' AND r.status = 'Pending')
@@ -1722,14 +1723,17 @@ class Document
                 )
                 OR (
                     r.id IS NULL
-                    AND d.destination_department_id = :department_id
+                    AND d.destination_department_id = :destination_department_id
                     AND d.status IN ('Released', 'Re-released')
                 )
             )
             ORDER BY d.released_at DESC
         ");
 
-        $stmt->execute(['department_id' => $department_id]);
+        $stmt->execute([
+            'route_department_id' => $department_id,
+            'destination_department_id' => $department_id
+        ]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -1757,7 +1761,7 @@ class Document
             FROM documents d
             LEFT JOIN document_routes r
                 ON d.id = r.document_id
-                AND r.to_department_id = :department_id
+                AND r.to_department_id = :route_department_id
             WHERE d.status IN ('Released', 'Re-released', 'Received')
             AND (
                 (r.routing_type = 'THRU' AND r.status = 'Pending')
@@ -1782,13 +1786,16 @@ class Document
                 )
                 OR (
                     r.id IS NULL
-                    AND d.destination_department_id = :department_id
+                    AND d.destination_department_id = :destination_department_id
                     AND d.status IN ('Released', 'Re-released')
                 )
             )
         ";
 
-        $params = ['department_id' => $department_id];
+        $params = [
+            'route_department_id' => $department_id,
+            'destination_department_id' => $department_id
+        ];
         $sql .= $this->buildDocumentFilterClause($filters, $params);
         $sql .= " ORDER BY d.released_at DESC, d.created_at DESC";
 
@@ -1808,8 +1815,10 @@ class Document
         $dateTo = trim($filters['date_to'] ?? '');
 
         if ($keyword !== '') {
-            $sql .= " AND (d.prefix LIKE :keyword OR d.title LIKE :keyword OR d.particulars LIKE :keyword)";
-            $params['keyword'] = "%{$keyword}%";
+            $sql .= " AND (d.prefix LIKE :keyword_prefix OR d.title LIKE :keyword_title OR d.particulars LIKE :keyword_particulars)";
+            $params['keyword_prefix'] = "%{$keyword}%";
+            $params['keyword_title'] = "%{$keyword}%";
+            $params['keyword_particulars'] = "%{$keyword}%";
         }
 
         if ($status !== '') {

@@ -49,14 +49,17 @@ class Department
             SELECT *
             FROM departments
             WHERE (
-                (parent_id IS NULL AND id <> :parent_department_id)
-                OR parent_id = :parent_department_id
+                (parent_id IS NULL AND id <> :excluded_parent_department_id)
+                OR parent_id = :child_parent_department_id
             )
             ORDER BY
                 CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END,
                 division_name ASC
         ");
-        $stmt->execute(['parent_department_id' => $parent_department_id]);
+        $stmt->execute([
+            'excluded_parent_department_id' => $parent_department_id,
+            'child_parent_department_id' => $parent_department_id
+        ]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -276,14 +279,15 @@ class Department
             FROM departments
             WHERE id = :target_department_id
             AND (
-                (parent_id IS NULL AND id <> :parent_department_id)
-                OR parent_id = :parent_department_id
+                (parent_id IS NULL AND id <> :excluded_parent_department_id)
+                OR parent_id = :child_parent_department_id
             )
         ");
 
         $stmt->execute([
             'target_department_id' => $target_department_id,
-            'parent_department_id' => $parent_department_id
+            'excluded_parent_department_id' => $parent_department_id,
+            'child_parent_department_id' => $parent_department_id
         ]);
 
         return (int) $stmt->fetchColumn() > 0;
@@ -293,12 +297,15 @@ class Department
     {
         $stmt = $this->db->prepare("
             SELECT * FROM documents
-            WHERE origin_department_id = :department_id
-            OR destination_department_id = :department_id
+            WHERE origin_department_id = :origin_department_id
+            OR destination_department_id = :destination_department_id
             ORDER BY created_at DESC
         ");
 
-        $stmt->execute(['department_id' => $department_id]);
+        $stmt->execute([
+            'origin_department_id' => $department_id,
+            'destination_department_id' => $department_id
+        ]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }
