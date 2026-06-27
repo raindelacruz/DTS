@@ -2247,14 +2247,15 @@ class Document
             FROM document_routes dr
             JOIN departments d ON dr.to_department_id = d.id
             WHERE dr.document_id = :document_id
-            AND dr.from_department_id = :parent_department_id
+            AND dr.from_department_id = :from_parent_department_id
             AND dr.routing_type = 'DELEGATE'
-            AND d.parent_id = :parent_department_id
+            AND d.parent_id = :child_parent_department_id
         ");
 
         $stmt->execute([
             'document_id' => $document_id,
-            'parent_department_id' => $parent_department_id
+            'from_parent_department_id' => $parent_department_id,
+            'child_parent_department_id' => $parent_department_id
         ]);
 
         return (int) $stmt->fetchColumn() > 0;

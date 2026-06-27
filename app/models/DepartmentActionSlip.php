@@ -656,18 +656,20 @@ class DepartmentActionSlip
                 FROM department_action_slips das
                 WHERE das.id = :slip_id
                 AND (
-                    das.assigned_staff_id = :user_id
+                    das.assigned_staff_id = :assigned_user_id
                     OR EXISTS (
                         SELECT 1
                         FROM department_action_slip_events e
                         WHERE e.slip_id = das.id
-                        AND (e.actor_user_id = :user_id OR e.to_user_id = :user_id)
+                        AND (e.actor_user_id = :actor_user_id OR e.to_user_id = :event_to_user_id)
                     )
                 )
             ");
             $stmt->execute([
                 'slip_id' => (int) $slipId,
-                'user_id' => (int) $userId
+                'assigned_user_id' => (int) $userId,
+                'actor_user_id' => (int) $userId,
+                'event_to_user_id' => (int) $userId
             ]);
             return (int) $stmt->fetchColumn() > 0;
         }
@@ -677,28 +679,35 @@ class DepartmentActionSlip
             FROM department_action_slips das
             WHERE das.id = :slip_id
             AND (
-                das.receiving_department_id = :department_id
-                OR das.receiving_division_id = :department_id
-                OR das.current_department_id = :department_id
-                OR das.current_division_id = :department_id
-                OR das.assigned_staff_id = :user_id
+                das.receiving_department_id = :receiving_department_id
+                OR das.receiving_division_id = :receiving_division_id
+                OR das.current_department_id = :current_department_id
+                OR das.current_division_id = :current_division_id
+                OR das.assigned_staff_id = :assigned_user_id
                 OR EXISTS (
                     SELECT 1
                     FROM department_action_slip_events e
                     WHERE e.slip_id = das.id
                     AND (
-                        e.actor_department_id = :department_id
-                        OR e.from_department_id = :department_id
-                        OR e.to_department_id = :department_id
-                        OR e.to_user_id = :user_id
+                        e.actor_department_id = :event_actor_department_id
+                        OR e.from_department_id = :event_from_department_id
+                        OR e.to_department_id = :event_to_department_id
+                        OR e.to_user_id = :event_to_user_id
                     )
                 )
             )
         ");
         $stmt->execute([
             'slip_id' => (int) $slipId,
-            'department_id' => (int) $departmentId,
-            'user_id' => (int) $userId
+            'receiving_department_id' => (int) $departmentId,
+            'receiving_division_id' => (int) $departmentId,
+            'current_department_id' => (int) $departmentId,
+            'current_division_id' => (int) $departmentId,
+            'assigned_user_id' => (int) $userId,
+            'event_actor_department_id' => (int) $departmentId,
+            'event_from_department_id' => (int) $departmentId,
+            'event_to_department_id' => (int) $departmentId,
+            'event_to_user_id' => (int) $userId
         ]);
 
         return (int) $stmt->fetchColumn() > 0;
@@ -1088,15 +1097,16 @@ class DepartmentActionSlip
             SELECT from_department_id
             FROM department_action_slip_events
             WHERE slip_id = :slip_id
-            AND to_department_id = :actor_department_id
+            AND to_department_id = :target_actor_department_id
             AND from_department_id IS NOT NULL
-            AND from_department_id <> :actor_department_id
+            AND from_department_id <> :excluded_actor_department_id
             ORDER BY id DESC
             LIMIT 1
         ");
         $stmt->execute([
             'slip_id' => (int) $slipId,
-            'actor_department_id' => (int) $actorDepartmentId
+            'target_actor_department_id' => (int) $actorDepartmentId,
+            'excluded_actor_department_id' => (int) $actorDepartmentId
         ]);
 
         $targetDepartmentId = (int) $stmt->fetchColumn();
