@@ -47,6 +47,34 @@ class Auth extends Controller
         return $this->securityService;
     }
 
+    private function isLoginBlocked($identifier, $ipAddress)
+    {
+        try {
+            return $this->security()->isLoginBlocked($identifier, $ipAddress);
+        } catch (Throwable $e) {
+            appLog('error', 'Login throttling unavailable', ['message' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    private function recordLoginFailure($identifier, $ipAddress)
+    {
+        try {
+            $this->security()->recordLoginFailure($identifier, $ipAddress);
+        } catch (Throwable $e) {
+            appLog('error', 'Login failure recording unavailable', ['message' => $e->getMessage()]);
+        }
+    }
+
+    private function clearLoginFailures($identifier, $ipAddress)
+    {
+        try {
+            $this->security()->clearLoginFailures($identifier, $ipAddress);
+        } catch (Throwable $e) {
+            appLog('error', 'Login failure clearing unavailable', ['message' => $e->getMessage()]);
+        }
+    }
+
     public function index()
     {
         $this->login();
@@ -79,8 +107,10 @@ class Auth extends Controller
             $values = [
                 'id_number' => trim($_POST['id_number'] ?? '')
             ];
+            $phase = 'start';
 
             try {
+                $phase = 'csrf';
                 validateCsrfOrFail();
 
                 $password = trim($_POST['password'] ?? '');
@@ -98,18 +128,20 @@ class Auth extends Controller
                     throw new ValidationException('Please correct the highlighted fields.', $errors);
                 }
 
+                $phase = 'throttle';
                 $ipAddress = clientIpAddress();
-                if ($this->security()->isLoginBlocked($values['id_number'], $ipAddress)) {
+                if ($this->isLoginBlocked($values['id_number'], $ipAddress)) {
                     securityAudit('login_blocked', null, null, ['identifier_hash' => hash('sha256', strtolower($values['id_number']))]);
                     throw new ValidationException('Too many sign-in attempts. Please try again later.', [
                         '_global' => 'Too many sign-in attempts. Please try again later.'
                     ]);
                 }
 
+                $phase = 'credential_lookup';
                 $user = $this->users()->login($values['id_number'], $password);
 
                 if (!$user) {
-                    $this->security()->recordLoginFailure($values['id_number'], $ipAddress);
+                    $this->recordLoginFailure($values['id_number'], $ipAddress);
                     securityAudit('login_failed', null, null, ['identifier_hash' => hash('sha256', strtolower($values['id_number']))]);
                     throw new ValidationException('Invalid credentials.', [
                         '_global' => 'The ID number or password you entered is incorrect.'
@@ -117,18 +149,22 @@ class Auth extends Controller
                 }
 
                 if (($user->status ?? 'inactive') !== 'active') {
-                    $this->security()->recordLoginFailure($values['id_number'], $ipAddress);
+                    $this->recordLoginFailure($values['id_number'], $ipAddress);
                     securityAudit('inactive_account_login', null, (int) $user->id);
                     throw new ValidationException('Your account is inactive.', [
                         '_global' => 'Your account is inactive. Please wait for administrator verification.'
                     ]);
                 }
 
-                $this->security()->clearLoginFailures($values['id_number'], $ipAddress);
+                $phase = 'session_start';
+                $this->clearLoginFailures($values['id_number'], $ipAddress);
                 $this->beginAuthenticatedSession($user);
+
+                $phase = 'post_login_updates';
                 $this->users()->markLoginSuccessful((int) $user->id);
                 securityAudit('login_succeeded', (int) $user->id, (int) $user->id);
 
+                $phase = 'post_login_redirect';
                 if (($user->role ?? '') === 'admin' && empty($user->mfa_enabled)) {
                     redirect('/auth/mfaSetup', 303);
                 }
@@ -150,8 +186,14 @@ class Auth extends Controller
                 storeFormState('auth_login', $values, $e->getErrors(), $e->getMessage());
                 redirect('/auth/login', 303);
             } catch (Throwable $e) {
-                reportException($e, ['action' => 'auth.login', 'id_number' => $values['id_number']]);
-                flash('auth_error', 'We could not sign you in right now. Please try again.', 'error');
+                $incidentId = 'LOGIN-' . strtoupper(bin2hex(random_bytes(4)));
+                reportException($e, [
+                    'action' => 'auth.login',
+                    'phase' => $phase,
+                    'incident_id' => $incidentId,
+                    'identifier_hash' => hash('sha256', strtolower($values['id_number']))
+                ]);
+                flash('auth_error', 'We could not sign you in right now. Reference: ' . $incidentId, 'error');
                 redirect('/auth/login', 303);
             }
         }
@@ -339,7 +381,12 @@ class Auth extends Controller
         if ($cookieValue === '') {
             return false;
         }
-        return $this->security()->isTrustedMfaDevice($cookieValue, (int) $user->id, (int) ($user->session_version ?? 0));
+        try {
+            return $this->security()->isTrustedMfaDevice($cookieValue, (int) $user->id, (int) ($user->session_version ?? 0));
+        } catch (Throwable $e) {
+            appLog('error', 'Trusted MFA device check failed', ['user_id' => (int) $user->id, 'message' => $e->getMessage()]);
+            return false;
+        }
     }
 
     private function passwordResetHeaders()
