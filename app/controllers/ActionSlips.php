@@ -1,8 +1,8 @@
 <?php
 
-require_once '../app/models/DepartmentActionSlip.php';
-require_once '../app/models/Department.php';
-require_once '../app/models/Notification.php';
+require_once APPROOT . '/models/DepartmentActionSlip.php';
+require_once APPROOT . '/models/Department.php';
+require_once APPROOT . '/models/Notification.php';
 
 class ActionSlips extends Controller
 {

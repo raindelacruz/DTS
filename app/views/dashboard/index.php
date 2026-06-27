@@ -1,4 +1,4 @@
-<?php require_once '../app/views/layout/header.php'; ?>
+<?php require_once APPROOT . '/views/layout/header.php'; ?>
 
 <div class="page-hero">
     <div>
@@ -46,4 +46,4 @@
     <a href="<?php echo URLROOT; ?>/documents/create" class="btn btn-outline-secondary">Create Document</a>
 </div>
 
-<?php require_once '../app/views/layout/footer.php'; ?>
+<?php require_once APPROOT . '/views/layout/footer.php'; ?>

@@ -5,6 +5,8 @@ if (is_file($composerAutoload)) {
     require_once $composerAutoload;
 }
 
+define('APPROOT', __DIR__);
+
 require_once 'config/config.php';
 require_once dirname(__DIR__) . '/helpers/auth_helper.php';
 

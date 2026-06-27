@@ -1,4 +1,4 @@
-<?php require_once '../app/views/layout/header.php'; ?>
+<?php require_once APPROOT . '/views/layout/header.php'; ?>
 
 <?php
 $filters = $data['filters'] ?? [];
@@ -145,4 +145,4 @@ $statusClasses = [
 
 <?php renderServerPagination($data['pagination'] ?? null); ?>
 
-<?php require_once '../app/views/layout/footer.php'; ?>
+<?php require_once APPROOT . '/views/layout/footer.php'; ?>

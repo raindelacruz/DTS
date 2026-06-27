@@ -1,4 +1,4 @@
-<?php require_once '../app/views/layout/header.php'; ?>
+<?php require_once APPROOT . '/views/layout/header.php'; ?>
 
 <div class="page-hero">
     <div><h1 class="section-title">Create Document</h1></div>
@@ -20,8 +20,8 @@
     $cancelUrl = $cancelUrl ?? (URLROOT . '/documents');
     $showAttachmentHint = $showAttachmentHint ?? false;
     $nextPrefix = $nextPrefix ?? '';
-    require '../app/views/documents/_form.php';
+    require APPROOT . '/views/documents/_form.php';
     ?>
 </div>
 
-<?php require_once '../app/views/layout/footer.php'; ?>
+<?php require_once APPROOT . '/views/layout/footer.php'; ?>

@@ -1,4 +1,4 @@
-<?php require_once '../app/views/layout/header.php'; ?>
+<?php require_once APPROOT . '/views/layout/header.php'; ?>
 
 <div class="page-hero compact">
     <div><h1 class="section-title" style="font-size:1.6rem;">Legacy View</h1></div>
@@ -10,4 +10,4 @@
     <p>This page is a placeholder for older document screens. Return to the main documents module to continue tracking, viewing details, or managing routing actions.</p>
 </div>
 
-<?php require_once '../app/views/layout/footer.php'; ?>
+<?php require_once APPROOT . '/views/layout/footer.php'; ?>

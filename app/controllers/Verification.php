@@ -1,7 +1,7 @@
 <?php
 
-require_once '../app/models/Document.php';
-require_once '../app/models/Department.php';
+require_once APPROOT . '/models/Document.php';
+require_once APPROOT . '/models/Department.php';
 
 class Verification extends Controller
 {
@@ -54,6 +54,6 @@ class Verification extends Controller
         $document = $isTokenFormatValid ? $this->documentModel->findByQrToken($qrToken) : null;
         $showFullDetails = $document ? $this->isAuthorizedViewer($document) : false;
 
-        require_once '../app/views/verification/verify.php';
+        require_once APPROOT . '/views/verification/verify.php';
     }
 }

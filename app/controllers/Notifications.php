@@ -1,6 +1,6 @@
 <?php
 
-require_once '../app/models/Notification.php';
+require_once APPROOT . '/models/Notification.php';
 
 class Notifications extends Controller
 {

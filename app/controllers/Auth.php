@@ -1,8 +1,8 @@
 <?php
 
-require_once '../app/models/User.php';
-require_once '../app/models/Department.php';
-require_once '../app/models/Notification.php';
+require_once APPROOT . '/models/User.php';
+require_once APPROOT . '/models/Department.php';
+require_once APPROOT . '/models/Notification.php';
 
 class Auth extends Controller
 {
@@ -472,7 +472,7 @@ class Auth extends Controller
             reportException($e, ['action' => 'auth.mfaSetup.qr', 'user_id' => $user->id]);
         }
         $rememberDeviceDays = (int) ceil(MFA_REMEMBER_DEVICE_SECONDS / 86400);
-        require_once '../app/views/auth/mfa_setup.php';
+        require_once APPROOT . '/views/auth/mfa_setup.php';
     }
 
     public function mfa()
@@ -504,7 +504,7 @@ class Auth extends Controller
                 $error = $e->getMessage();
             }
         }
-        require_once '../app/views/auth/mfa.php';
+        require_once APPROOT . '/views/auth/mfa.php';
     }
 
     public function forgotPassword()
@@ -530,7 +530,7 @@ class Auth extends Controller
             }
             $message = 'If the address belongs to an active account, password-reset instructions have been sent.';
         }
-        require_once '../app/views/auth/forgot_password.php';
+        require_once APPROOT . '/views/auth/forgot_password.php';
     }
 
     public function resetPassword($token = '')
@@ -560,6 +560,6 @@ class Auth extends Controller
                 $error = $e->getMessage();
             }
         }
-        require_once '../app/views/auth/reset_password.php';
+        require_once APPROOT . '/views/auth/reset_password.php';
     }
 }

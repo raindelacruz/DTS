@@ -1,4 +1,4 @@
-<?php require_once '../app/views/layout/header.php'; ?>
+<?php require_once APPROOT . '/views/layout/header.php'; ?>
 <?php
 $department = $data['department'];
 $edit = $data['department_form'];
@@ -85,4 +85,4 @@ $fieldClass = function ($errors, $field) { return isset($errors[$field]) ? ' is-
     </form>
 </div>
 
-<?php require_once '../app/views/layout/footer.php'; ?>
+<?php require_once APPROOT . '/views/layout/footer.php'; ?>

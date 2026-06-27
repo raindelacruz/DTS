@@ -1,4 +1,4 @@
-<?php require_once '../app/views/layout/header.php'; ?>
+<?php require_once APPROOT . '/views/layout/header.php'; ?>
 
 <?php
 $routeType = $routeRole['route_type'] ?? null;
@@ -635,4 +635,4 @@ $renderTimelineRemarks = function ($log) use ($document) {
 })();
 </script>
 
-<?php require_once '../app/views/layout/footer.php'; ?>
+<?php require_once APPROOT . '/views/layout/footer.php'; ?>

@@ -1,8 +1,8 @@
 <?php
 
-require_once '../app/models/User.php';
-require_once '../app/models/Department.php';
-require_once '../app/models/Notification.php';
+require_once APPROOT . '/models/User.php';
+require_once APPROOT . '/models/Department.php';
+require_once APPROOT . '/models/Notification.php';
 
 class Users extends Controller
 {

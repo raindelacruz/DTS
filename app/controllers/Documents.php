@@ -1,10 +1,10 @@
 <?php
 
-require_once '../app/models/Document.php';
-require_once '../app/models/Department.php';
-require_once '../app/models/Notification.php';
-require_once '../app/lib/QrCodeService.php';
-require_once '../app/lib/PdfOverlayService.php';
+require_once APPROOT . '/models/Document.php';
+require_once APPROOT . '/models/Department.php';
+require_once APPROOT . '/models/Notification.php';
+require_once APPROOT . '/lib/QrCodeService.php';
+require_once APPROOT . '/lib/PdfOverlayService.php';
 
 class Documents extends Controller
 {
@@ -711,7 +711,7 @@ class Documents extends Controller
         $nextPrefix = $this->documentModel->getNextPrefix((int) $_SESSION['department_id']);
         $errors = $state['errors'];
         $formMessage = $state['message'];
-        require_once '../app/views/documents/create.php';
+        require_once APPROOT . '/views/documents/create.php';
     }
 
     private function renderEditForm($document)
@@ -765,7 +765,7 @@ class Documents extends Controller
         $showAttachmentHint = true;
         $errors = $state['errors'];
         $formMessage = $state['message'];
-        require_once '../app/views/documents/edit.php';
+        require_once APPROOT . '/views/documents/edit.php';
     }
 
     private function ensureForwardableDocument($document)
@@ -843,7 +843,7 @@ class Documents extends Controller
         $formValues = $state['values'];
         $errors = $state['errors'];
         $formMessage = $state['message'];
-        require_once '../app/views/documents/forward.php';
+        require_once APPROOT . '/views/documents/forward.php';
     }
 
     public function index()
@@ -2066,7 +2066,7 @@ class Documents extends Controller
                 }
             }
 
-            require_once '../app/views/documents/view.php';
+            require_once APPROOT . '/views/documents/view.php';
         } catch (NotFoundException $e) {
             flash('error', 'Document not found.', 'error');
             redirect('/documents', 303);
@@ -2165,7 +2165,7 @@ class Documents extends Controller
             $sourceUrl = URLROOT . '/documents/source/' . $documentId;
             $previewUrl = $sourceUrl;
 
-            require_once '../app/views/documents/attachment.php';
+            require_once APPROOT . '/views/documents/attachment.php';
         } catch (NotFoundException $e) {
             flash('error', 'Attachment not found.', 'error');
             redirect('/documents/show/' . $documentId, 303);

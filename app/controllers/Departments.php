@@ -1,6 +1,6 @@
 <?php
 
-require_once '../app/models/Department.php';
+require_once APPROOT . '/models/Department.php';
 
 class Departments extends Controller
 {

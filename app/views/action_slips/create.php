@@ -1,4 +1,4 @@
-<?php require_once '../app/views/layout/header.php'; ?>
+<?php require_once APPROOT . '/views/layout/header.php'; ?>
 
 <?php
 $values = $data['values'] ?? [];
@@ -286,4 +286,4 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
 </script>
 <?php endif; ?>
 
-<?php require_once '../app/views/layout/footer.php'; ?>
+<?php require_once APPROOT . '/views/layout/footer.php'; ?>
