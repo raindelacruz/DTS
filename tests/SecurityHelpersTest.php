@@ -52,6 +52,28 @@ return [
         test_assert($firstThrowPosition === false || $firstThrowPosition > $classPosition, 'PDF dependencies must not throw while loading document routes.');
     },
 
+    'trusted mfa cookie can validate without database lookup' => function ($root) {
+        require_once $root . '/app/init.php';
+
+        $_SERVER['HTTP_USER_AGENT'] = 'DTS trusted-device test';
+        $security = (new ReflectionClass(SecurityService::class))->newInstanceWithoutConstructor();
+        $sign = new ReflectionMethod(SecurityService::class, 'signedTrustedMfaCookie');
+        $sign->setAccessible(true);
+        $verify = new ReflectionMethod(SecurityService::class, 'isSignedTrustedMfaCookie');
+        $verify->setAccessible(true);
+
+        $cookie = $sign->invoke($security, 25, 7, 'test-token');
+        test_assert($verify->invoke($security, $cookie, 25, 7), 'Signed trusted-device cookie should validate for the same user/session/browser.');
+        test_assert(!$verify->invoke($security, $cookie, 25, 8), 'Signed trusted-device cookie should not validate after session version changes.');
+        $_SERVER['HTTP_USER_AGENT'] = 'Different browser';
+        test_assert(!$verify->invoke($security, $cookie, 25, 7), 'Signed trusted-device cookie should be bound to the browser user-agent.');
+    },
+
+    'mfa remember device writes cookies on known paths' => function ($root) {
+        $source = file_get_contents($root . '/app/controllers/Auth.php');
+        test_assert(strpos($source, 'setCookieOnKnownPaths(MFA_TRUSTED_DEVICE_COOKIE') !== false, 'Remember-device cookies should be written on all known app paths.');
+    },
+
     'csrf tokens survive missing form-state session' => function ($root) {
         require_once $root . '/app/init.php';
 

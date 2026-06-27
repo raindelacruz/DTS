@@ -180,6 +180,25 @@ function expireCookieOnKnownPaths($name)
     }
 }
 
+function setCookieOnKnownPaths($name, $value, $options)
+{
+    $options = is_array($options) ? $options : [];
+    $baseOptions = [
+        'expires' => (int) ($options['expires'] ?? 0),
+        'secure' => (bool) ($options['secure'] ?? isSecureRequest()),
+        'httponly' => (bool) ($options['httponly'] ?? true),
+        'samesite' => (string) ($options['samesite'] ?? 'Lax')
+    ];
+
+    if (!empty($options['domain'])) {
+        $baseOptions['domain'] = (string) $options['domain'];
+    }
+
+    foreach (cookiePathVariants() as $path) {
+        setcookie((string) $name, (string) $value, $baseOptions + ['path' => $path]);
+    }
+}
+
 function expireCookieOnLegacyPaths($name)
 {
     $currentPath = '/' . trim(APP_COOKIE_PATH, '/');

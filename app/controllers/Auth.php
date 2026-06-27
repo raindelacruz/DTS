@@ -390,7 +390,7 @@ class Auth extends Controller
             $sessionVersion = $this->users()->currentSessionVersion((int) $user->id);
             $cookieValue = $this->security()->createTrustedMfaDevice((int) $user->id, $sessionVersion);
             expireCookieOnKnownPaths(MFA_TRUSTED_DEVICE_COOKIE);
-            setcookie(MFA_TRUSTED_DEVICE_COOKIE, $cookieValue, $this->trustedMfaCookieOptions(time() + MFA_REMEMBER_DEVICE_SECONDS));
+            setCookieOnKnownPaths(MFA_TRUSTED_DEVICE_COOKIE, $cookieValue, $this->trustedMfaCookieOptions(time() + MFA_REMEMBER_DEVICE_SECONDS));
             return true;
         } catch (Throwable $e) {
             reportException($e, ['action' => 'auth.rememberMfaDevice', 'user_id' => (int) $user->id]);

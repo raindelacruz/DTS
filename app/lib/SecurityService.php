@@ -74,24 +74,32 @@ class SecurityService
     public function createTrustedMfaDevice($userId, $sessionVersion)
     {
         $token = bin2hex(random_bytes(32));
-        $this->db->query("
-            INSERT INTO mfa_trusted_devices
-                (user_id, token_hash, user_agent_hash, session_version, expires_at, last_used_at)
-            VALUES
-                (:user_id, :token_hash, :user_agent_hash, :session_version, DATE_ADD(NOW(), INTERVAL :ttl SECOND), NOW())
-        ");
-        $this->db->bind(':user_id', (int) $userId);
-        $this->db->bind(':token_hash', hash('sha256', $token));
-        $this->db->bind(':user_agent_hash', $this->userAgentHash());
-        $this->db->bind(':session_version', (int) $sessionVersion);
-        $this->db->bind(':ttl', MFA_REMEMBER_DEVICE_SECONDS);
-        $this->db->execute();
+        try {
+            $this->db->query("
+                INSERT INTO mfa_trusted_devices
+                    (user_id, token_hash, user_agent_hash, session_version, expires_at, last_used_at)
+                VALUES
+                    (:user_id, :token_hash, :user_agent_hash, :session_version, DATE_ADD(NOW(), INTERVAL :ttl SECOND), NOW())
+            ");
+            $this->db->bind(':user_id', (int) $userId);
+            $this->db->bind(':token_hash', hash('sha256', $token));
+            $this->db->bind(':user_agent_hash', $this->userAgentHash());
+            $this->db->bind(':session_version', (int) $sessionVersion);
+            $this->db->bind(':ttl', MFA_REMEMBER_DEVICE_SECONDS);
+            $this->db->execute();
+        } catch (Throwable $e) {
+            appLog('error', 'Trusted MFA device database write failed', ['user_id' => (int) $userId, 'message' => $e->getMessage()]);
+        }
 
-        return (int) $userId . ':' . $token;
+        return $this->signedTrustedMfaCookie((int) $userId, (int) $sessionVersion, $token);
     }
 
     public function isTrustedMfaDevice($cookieValue, $userId, $sessionVersion)
     {
+        if ($this->isSignedTrustedMfaCookie($cookieValue, $userId, $sessionVersion)) {
+            return true;
+        }
+
         $parts = explode(':', (string) $cookieValue, 2);
         if (count($parts) !== 2 || (int) $parts[0] !== (int) $userId || !preg_match('/^[a-f0-9]{64}$/', $parts[1])) {
             return false;
@@ -121,6 +129,49 @@ class SecurityService
         $this->db->bind(':id', (int) $device->id);
         $this->db->execute();
         return true;
+    }
+
+    private function signedTrustedMfaCookie($userId, $sessionVersion, $token)
+    {
+        $payload = [
+            'user_id' => (int) $userId,
+            'session_version' => (int) $sessionVersion,
+            'user_agent_hash' => $this->userAgentHash(),
+            'token_hash' => hash('sha256', (string) $token),
+            'expires_at' => time() + MFA_REMEMBER_DEVICE_SECONDS
+        ];
+        $encodedPayload = base64UrlEncode(json_encode($payload, JSON_UNESCAPED_SLASHES));
+        $signature = hash_hmac('sha256', $encodedPayload, APP_KEY);
+        return 'v2.' . $encodedPayload . '.' . $signature;
+    }
+
+    private function isSignedTrustedMfaCookie($cookieValue, $userId, $sessionVersion)
+    {
+        $parts = explode('.', (string) $cookieValue);
+        if (count($parts) !== 3 || $parts[0] !== 'v2') {
+            return false;
+        }
+
+        [$version, $encodedPayload, $signature] = $parts;
+        $expectedSignature = hash_hmac('sha256', $encodedPayload, APP_KEY);
+        if (!hash_equals($expectedSignature, $signature)) {
+            return false;
+        }
+
+        $decodedPayload = base64UrlDecode($encodedPayload);
+        if ($decodedPayload === false) {
+            return false;
+        }
+
+        $payload = json_decode($decodedPayload, true);
+        if (!is_array($payload)) {
+            return false;
+        }
+
+        return (int) ($payload['user_id'] ?? 0) === (int) $userId
+            && (int) ($payload['session_version'] ?? -1) === (int) $sessionVersion
+            && (int) ($payload['expires_at'] ?? 0) > time()
+            && hash_equals((string) ($payload['user_agent_hash'] ?? ''), $this->userAgentHash());
     }
 
     public function pruneExpiredTrustedMfaDevices()
