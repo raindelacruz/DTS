@@ -622,9 +622,10 @@ class Auth extends Controller
 
     public function forgotPassword()
     {
-        $message = '';
+        $message = 'Forgot password is temporarily disabled while this feature is work in progress.';
         $developmentResetUrl = '';
-        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+        $disabled = true;
+        if (!$disabled && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             validateCsrfOrFail();
             $email = strtolower(trim($_POST['email'] ?? ''));
             $user = filter_var($email, FILTER_VALIDATE_EMAIL) ? $this->users()->findByEmail($email) : null;
