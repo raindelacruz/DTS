@@ -101,6 +101,19 @@ class Auth extends Controller
         ];
     }
 
+    private function renderLogin($values = [], $errors = [], $message = '', $error = '', $success = '')
+    {
+        $data = [
+            'values' => array_merge($this->loginDefaults(), is_array($values) ? $values : []),
+            'errors' => is_array($errors) ? $errors : [],
+            'message' => (string) $message,
+            'error' => (string) $error,
+            'success' => (string) $success
+        ];
+
+        $this->view('auth/login', $data);
+    }
+
     public function login()
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
@@ -183,8 +196,11 @@ class Auth extends Controller
                 flash('auth_success', 'Welcome back.', 'success');
                 redirect('/dashboard', 303);
             } catch (ValidationException $e) {
-                storeFormState('auth_login', $values, $e->getErrors(), $e->getMessage());
-                redirect('/auth/login', 303);
+                http_response_code(422);
+                $errors = $e->getErrors();
+                $message = $errors['_global'] ?? $e->getMessage();
+                $this->renderLogin($values, $errors, $message);
+                return;
             } catch (Throwable $e) {
                 $incidentId = 'LOGIN-' . strtoupper(bin2hex(random_bytes(4)));
                 reportException($e, [
@@ -196,22 +212,20 @@ class Auth extends Controller
                 $detail = APP_ENV !== 'production'
                     ? ' (' . $phase . ': ' . $e->getMessage() . ')'
                     : '';
-                flash('auth_error', 'We could not sign you in right now. Reference: ' . $incidentId . $detail, 'error');
-                redirect('/auth/login', 303);
+                http_response_code(500);
+                $this->renderLogin($values, [], '', 'We could not sign you in right now. Reference: ' . $incidentId . $detail);
+                return;
             }
         }
 
         $state = pullFormState('auth_login', $this->loginDefaults());
-
-        $data = [
-            'values' => $state['values'],
-            'errors' => $state['errors'],
-            'message' => $state['message'],
-            'error' => pullFlash('auth_error')['message'] ?? '',
-            'success' => pullFlash('auth_success')['message'] ?? ''
-        ];
-
-        $this->view('auth/login', $data);
+        $this->renderLogin(
+            $state['values'],
+            $state['errors'],
+            $state['message'],
+            pullFlash('auth_error')['message'] ?? '',
+            pullFlash('auth_success')['message'] ?? ''
+        );
     }
 
     public function register()
