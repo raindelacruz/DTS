@@ -11,22 +11,31 @@ class SecurityService
 
     public function isLoginBlocked($identifier, $ipAddress)
     {
-        $identifierHash = hash('sha256', strtolower(trim($identifier)));
-        $ipBucketHash = hash('sha256', 'ip-bucket');
-        $this->db->query("SELECT MAX(locked_until) AS locked_until FROM login_attempts WHERE (identifier_hash = :identifier_hash AND ip_address IN (:ip_address, '*')) OR (identifier_hash = :ip_bucket_hash AND ip_address = :ip_address2)");
-        $this->db->bind(':identifier_hash', $identifierHash);
-        $this->db->bind(':ip_address', $ipAddress);
-        $this->db->bind(':ip_bucket_hash', $ipBucketHash);
-        $this->db->bind(':ip_address2', $ipAddress);
-        $row = $this->db->single();
-        return $row && !empty($row->locked_until) && strtotime($row->locked_until) > time();
+        try {
+            $identifierHash = hash('sha256', strtolower(trim($identifier)));
+            $ipBucketHash = hash('sha256', 'ip-bucket');
+            $this->db->query("SELECT MAX(locked_until) AS locked_until FROM login_attempts WHERE (identifier_hash = :identifier_hash AND ip_address IN (:ip_address, '*')) OR (identifier_hash = :ip_bucket_hash AND ip_address = :ip_address2)");
+            $this->db->bind(':identifier_hash', $identifierHash);
+            $this->db->bind(':ip_address', $ipAddress);
+            $this->db->bind(':ip_bucket_hash', $ipBucketHash);
+            $this->db->bind(':ip_address2', $ipAddress);
+            $row = $this->db->single();
+            return $row && !empty($row->locked_until) && strtotime($row->locked_until) > time();
+        } catch (Throwable $e) {
+            appLog('error', 'Login throttling check failed', ['message' => $e->getMessage()]);
+            return false;
+        }
     }
 
     public function recordLoginFailure($identifier, $ipAddress)
     {
-        $hash = hash('sha256', strtolower(trim($identifier)));
-        foreach ([[$hash, $ipAddress], [$hash, '*'], [hash('sha256', 'ip-bucket'), $ipAddress]] as [$bucketHash, $bucketIp]) {
-            $this->recordFailureBucket($bucketHash, $bucketIp);
+        try {
+            $hash = hash('sha256', strtolower(trim($identifier)));
+            foreach ([[$hash, $ipAddress], [$hash, '*'], [hash('sha256', 'ip-bucket'), $ipAddress]] as [$bucketHash, $bucketIp]) {
+                $this->recordFailureBucket($bucketHash, $bucketIp);
+            }
+        } catch (Throwable $e) {
+            appLog('error', 'Login failure tracking failed', ['message' => $e->getMessage()]);
         }
     }
 
@@ -52,10 +61,14 @@ class SecurityService
 
     public function clearLoginFailures($identifier, $ipAddress)
     {
-        $this->db->query("DELETE FROM login_attempts WHERE identifier_hash = :identifier_hash AND ip_address IN (:ip_address, '*')");
-        $this->db->bind(':identifier_hash', hash('sha256', strtolower(trim($identifier))));
-        $this->db->bind(':ip_address', $ipAddress);
-        $this->db->execute();
+        try {
+            $this->db->query("DELETE FROM login_attempts WHERE identifier_hash = :identifier_hash AND ip_address IN (:ip_address, '*')");
+            $this->db->bind(':identifier_hash', hash('sha256', strtolower(trim($identifier))));
+            $this->db->bind(':ip_address', $ipAddress);
+            $this->db->execute();
+        } catch (Throwable $e) {
+            appLog('error', 'Login failure clearing failed', ['message' => $e->getMessage()]);
+        }
     }
 
     public function createTrustedMfaDevice($userId, $sessionVersion)

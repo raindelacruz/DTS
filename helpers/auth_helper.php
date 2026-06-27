@@ -88,9 +88,6 @@ function securityAudit($eventType, $actorUserId = null, $targetUserId = null, $m
         (new SecurityService())->audit($eventType, $actorUserId, $targetUserId, $metadata);
     } catch (Throwable $e) {
         appLog('error', 'Security audit write failed', ['event_type' => $eventType, 'message' => $e->getMessage()]);
-        if (APP_ENV === 'production') {
-            throw $e;
-        }
     }
 }
 

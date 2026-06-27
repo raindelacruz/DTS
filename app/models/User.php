@@ -252,9 +252,14 @@ class User {
 
     public function markLoginSuccessful($id)
     {
-        $this->db->query('UPDATE users SET last_login_at = NOW() WHERE id = :id');
-        $this->db->bind(':id', $id);
-        return $this->db->execute();
+        try {
+            $this->db->query('UPDATE users SET last_login_at = NOW() WHERE id = :id');
+            $this->db->bind(':id', $id);
+            return $this->db->execute();
+        } catch (Throwable $e) {
+            appLog('error', 'Last-login update failed', ['user_id' => (int) $id, 'message' => $e->getMessage()]);
+            return false;
+        }
     }
 
     public function configureMfa($id, $encryptedSecret)
