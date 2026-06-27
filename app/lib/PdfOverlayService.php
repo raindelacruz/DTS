@@ -1,17 +1,20 @@
 <?php
 
-if (!class_exists('setasign\\Fpdi\\Tcpdf\\Fpdi') || !class_exists('TCPDF')) {
-    throw new RuntimeException('Managed PDF dependencies are not installed. Run composer install.');
-}
-
-if (!class_exists('pdf', false) && class_exists('TCPDF', false)) {
-    class_alias('TCPDF', 'pdf');
-}
-
 use setasign\Fpdi\Tcpdf\Fpdi;
 
 class PdfOverlayService
 {
+    private static function ensureDependencies()
+    {
+        if (!class_exists('setasign\\Fpdi\\Tcpdf\\Fpdi') || !class_exists('TCPDF')) {
+            throw new RuntimeException('Managed PDF dependencies are not installed. Run composer install.');
+        }
+
+        if (!class_exists('pdf', false) && class_exists('TCPDF', false)) {
+            class_alias('TCPDF', 'pdf');
+        }
+    }
+
     public static function streamStampedPdf($sourcePath, $verificationUrl, $downloadName)
     {
         // Temporarily Disabled – QR Code Printing Feature
@@ -23,6 +26,8 @@ class PdfOverlayService
             readfile($sourcePath);
             return;
         }
+
+        self::ensureDependencies();
 
         $pdf = new Fpdi('P', 'mm');
         $pdf->setPrintHeader(false);

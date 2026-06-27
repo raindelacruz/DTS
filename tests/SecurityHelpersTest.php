@@ -43,6 +43,15 @@ return [
         unset($_GET['url']);
     },
 
+    'pdf overlay dependencies are checked lazily' => function ($root) {
+        $source = file_get_contents($root . '/app/lib/PdfOverlayService.php');
+        $classPosition = strpos($source, 'class PdfOverlayService');
+        $firstThrowPosition = strpos($source, 'throw new RuntimeException');
+
+        test_assert($classPosition !== false, 'PdfOverlayService class should exist.');
+        test_assert($firstThrowPosition === false || $firstThrowPosition > $classPosition, 'PDF dependencies must not throw while loading document routes.');
+    },
+
     'csrf tokens survive missing form-state session' => function ($root) {
         require_once $root . '/app/init.php';
 
