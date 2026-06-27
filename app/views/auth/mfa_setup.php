@@ -1,1 +1,86 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up MFA - <?php echo htmlspecialchars(SITENAME); ?></title><style>body{font-family:Arial,sans-serif;background:#f1f5f9;display:grid;place-items:center;min-height:100vh;margin:0}.card{background:#fff;padding:32px;border-radius:16px;max-width:560px;width:calc(100% - 48px);box-shadow:0 16px 40px #0f172a18}.qr{display:flex;justify-content:center;margin:20px 0}.qr img{width:min(260px,100%);height:auto;border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#fff}code{display:block;padding:12px;background:#f8fafc;overflow-wrap:anywhere}input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:10px;border-radius:8px}input{border:1px solid #cbd5e1}.check{display:flex;gap:10px;align-items:center;margin:12px 0}.check input{width:auto;margin:0}.check label{font-size:.95rem}button{border:0;background:#0f766e;color:#fff;font-weight:700}.error{color:#b91c1c}</style></head><body><main class="card"><h1>Secure your account</h1><?php if ($qrCodeDataUri !== ''): ?><p>Scan this QR code with Google Authenticator, Microsoft Authenticator, Authy, or another TOTP authenticator app.</p><div class="qr"><img src="<?php echo htmlspecialchars($qrCodeDataUri, ENT_QUOTES, 'UTF-8'); ?>" alt="MFA setup QR code"></div><?php else: ?><p>Enter the manual setup key in Google Authenticator, Microsoft Authenticator, Authy, or another TOTP authenticator app.</p><?php endif; ?><details open><summary>Manual setup key</summary><strong>Secret</strong><code><?php echo htmlspecialchars($secret); ?></code><strong>Provisioning URI</strong><code><?php echo htmlspecialchars($provisioningUri); ?></code></details><?php if ($error): ?><p class="error"><?php echo htmlspecialchars($error); ?></p><?php endif; ?><form method="post"><?php echo csrfInput(); ?><label for="code">Enter the generated six-digit code</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus><div class="check"><input id="remember_device" name="remember_device" type="checkbox" value="1" checked><label for="remember_device">Remember this device for <?php echo (int) $rememberDeviceDays; ?> days</label></div><button type="submit">Enable MFA</button></form></main></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Set up MFA - <?php echo htmlspecialchars(SITENAME); ?></title>
+    <style>
+        body{font-family:Arial,sans-serif;background:#f1f5f9;display:grid;place-items:center;min-height:100vh;margin:0}
+        .card{background:#fff;padding:32px;border-radius:16px;max-width:560px;width:calc(100% - 48px);box-shadow:0 16px 40px #0f172a18}
+        .qr{display:flex;justify-content:center;margin:20px 0;min-height:260px;align-items:center}
+        .qr img,.qr svg{width:min(260px,100%);height:auto;border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#fff;box-sizing:border-box}
+        .qr-fallback{color:#64748b;text-align:center}
+        code{display:block;padding:12px;background:#f8fafc;overflow-wrap:anywhere}
+        input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:10px;border-radius:8px}
+        input{border:1px solid #cbd5e1}
+        .check{display:flex;gap:10px;align-items:center;margin:12px 0}
+        .check input{width:auto;margin:0}
+        .check label{font-size:.95rem}
+        button{border:0;background:#0f766e;color:#fff;font-weight:700}
+        .error{color:#b91c1c}
+    </style>
+</head>
+<body>
+<main class="card">
+    <h1>Secure your account</h1>
+    <p>Scan this QR code with Google Authenticator, Microsoft Authenticator, Authy, or another TOTP authenticator app.</p>
+
+    <div class="qr">
+        <?php if ($qrCodeDataUri !== ''): ?>
+            <img src="<?php echo htmlspecialchars($qrCodeDataUri, ENT_QUOTES, 'UTF-8'); ?>" alt="MFA setup QR code">
+        <?php else: ?>
+            <div
+                id="mfa-qr-fallback"
+                class="qr-fallback"
+                data-provisioning-uri="<?php echo htmlspecialchars($provisioningUri, ENT_QUOTES, 'UTF-8'); ?>"
+            >Preparing QR code...</div>
+        <?php endif; ?>
+    </div>
+
+    <details <?php echo $qrCodeDataUri === '' ? 'open' : ''; ?>>
+        <summary>Manual setup key</summary>
+        <strong>Secret</strong>
+        <code><?php echo htmlspecialchars($secret); ?></code>
+        <strong>Provisioning URI</strong>
+        <code><?php echo htmlspecialchars($provisioningUri); ?></code>
+    </details>
+
+    <?php if ($error): ?>
+        <p class="error"><?php echo htmlspecialchars($error); ?></p>
+    <?php endif; ?>
+
+    <form method="post">
+        <?php echo csrfInput(); ?>
+        <label for="code">Enter the generated six-digit code</label>
+        <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus>
+        <div class="check">
+            <input id="remember_device" name="remember_device" type="checkbox" value="1" checked>
+            <label for="remember_device">Remember this device for <?php echo (int) $rememberDeviceDays; ?> days</label>
+        </div>
+        <button type="submit">Enable MFA</button>
+    </form>
+</main>
+
+<?php if ($qrCodeDataUri === ''): ?>
+    <script src="<?php echo htmlspecialchars(URLROOT, ENT_QUOTES, 'UTF-8'); ?>/assets/qrcode-generator.js"></script>
+    <script>
+        (function () {
+            var target = document.getElementById('mfa-qr-fallback');
+            if (!target || typeof qrcode !== 'function') {
+                return;
+            }
+
+            try {
+                var qr = qrcode(0, 'M');
+                qr.addData(target.getAttribute('data-provisioning-uri') || '');
+                qr.make();
+                target.innerHTML = qr.createSvgTag(5, 4, 'MFA setup QR code');
+                target.className = '';
+            } catch (error) {
+                target.textContent = 'Use the manual setup key below.';
+            }
+        })();
+    </script>
+<?php endif; ?>
+</body>
+</html>
