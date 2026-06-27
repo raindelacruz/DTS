@@ -222,7 +222,9 @@ function appLog($level, $message, $context = [])
         !empty($context) ? ' ' . json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : ''
     ) . PHP_EOL;
 
-    @error_log($line, 3, $logDir . '/app.log');
+    if (!@error_log($line, 3, $logDir . '/app.log')) {
+        error_log(trim($line));
+    }
 }
 
 function reportException(Throwable $exception, $context = [])

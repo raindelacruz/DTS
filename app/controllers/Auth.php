@@ -193,7 +193,10 @@ class Auth extends Controller
                     'incident_id' => $incidentId,
                     'identifier_hash' => hash('sha256', strtolower($values['id_number']))
                 ]);
-                flash('auth_error', 'We could not sign you in right now. Reference: ' . $incidentId, 'error');
+                $detail = APP_ENV !== 'production'
+                    ? ' (' . $phase . ': ' . $e->getMessage() . ')'
+                    : '';
+                flash('auth_error', 'We could not sign you in right now. Reference: ' . $incidentId . $detail, 'error');
                 redirect('/auth/login', 303);
             }
         }
