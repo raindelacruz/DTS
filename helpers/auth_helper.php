@@ -131,11 +131,71 @@ function clearAuthenticatedSession()
 {
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {
-        $params = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+        expireCookieOnKnownPaths(session_name());
     }
     session_destroy();
     session_start();
+}
+
+function cookiePathVariants()
+{
+    $paths = [APP_COOKIE_PATH, '/'];
+    $urlPath = trim((string) (parse_url(URLROOT, PHP_URL_PATH) ?: ''), '/');
+    if ($urlPath !== '') {
+        $segments = explode('/', $urlPath);
+        $accumulator = '';
+        foreach ($segments as $segment) {
+            $accumulator .= '/' . trim($segment, '/');
+            $paths[] = $accumulator;
+            $paths[] = $accumulator . '/';
+        }
+    }
+
+    $normalized = [];
+    foreach ($paths as $path) {
+        $path = '/' . trim((string) $path, '/');
+        $path = $path === '/' ? '/' : $path;
+        $normalized[$path] = $path;
+    }
+
+    return array_values($normalized);
+}
+
+function expireCookieOnKnownPaths($name)
+{
+    $params = session_get_cookie_params();
+    $options = [
+        'expires' => time() - 42000,
+        'secure' => isSecureRequest(),
+        'httponly' => true,
+        'samesite' => 'Lax'
+    ];
+    $domain = $params['domain'] ?? '';
+    if ($domain !== '') {
+        $options['domain'] = $domain;
+    }
+
+    foreach (cookiePathVariants() as $path) {
+        setcookie((string) $name, '', $options + ['path' => $path]);
+    }
+}
+
+function expireCookieOnLegacyPaths($name)
+{
+    $currentPath = '/' . trim(APP_COOKIE_PATH, '/');
+    $currentPath = $currentPath === '/' ? '/' : $currentPath;
+    foreach (cookiePathVariants() as $path) {
+        if ($path === $currentPath) {
+            continue;
+        }
+        setcookie((string) $name, '', [
+            'expires' => time() - 42000,
+            'path' => $path,
+            'secure' => isSecureRequest(),
+            'httponly' => true,
+            'samesite' => 'Lax'
+        ]);
+    }
 }
 
 function refreshAuthenticatedSession()

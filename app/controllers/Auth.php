@@ -344,8 +344,7 @@ class Auth extends Controller
             $_SESSION = [];
 
             if (ini_get('session.use_cookies')) {
-                $params = session_get_cookie_params();
-                setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+                expireCookieOnKnownPaths(session_name());
             }
 
             session_destroy();
@@ -363,6 +362,7 @@ class Auth extends Controller
     private function beginAuthenticatedSession($user)
     {
         session_regenerate_id(true);
+        expireCookieOnLegacyPaths(session_name());
         $_SESSION['user_id'] = (int) $user->id;
         $_SESSION['department_id'] = (int) $user->department_id;
         $_SESSION['role'] = (string) $user->role;
@@ -389,6 +389,7 @@ class Auth extends Controller
         try {
             $sessionVersion = $this->users()->currentSessionVersion((int) $user->id);
             $cookieValue = $this->security()->createTrustedMfaDevice((int) $user->id, $sessionVersion);
+            expireCookieOnKnownPaths(MFA_TRUSTED_DEVICE_COOKIE);
             setcookie(MFA_TRUSTED_DEVICE_COOKIE, $cookieValue, $this->trustedMfaCookieOptions(time() + MFA_REMEMBER_DEVICE_SECONDS));
             return true;
         } catch (Throwable $e) {

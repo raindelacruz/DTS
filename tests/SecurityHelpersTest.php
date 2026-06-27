@@ -25,6 +25,24 @@ return [
         test_assert_same('/', APP_COOKIE_PATH, 'MFA trusted-device cookies must be sent on root-routed production URLs.');
     },
 
+    'cookie cleanup includes legacy app paths' => function ($root) {
+        require_once $root . '/app/init.php';
+
+        $paths = cookiePathVariants();
+        test_assert(in_array('/', $paths, true), 'Root cookie path should be cleaned up.');
+        test_assert(in_array('/DTS', $paths, true), 'Legacy DTS path should be cleaned up.');
+        test_assert(in_array('/DTS/public', $paths, true), 'Legacy public path should be cleaned up.');
+    },
+
+    'empty rewritten urls fall back to login route' => function ($root) {
+        require_once $root . '/app/init.php';
+
+        $_GET['url'] = '';
+        $app = (new ReflectionClass(App::class))->newInstanceWithoutConstructor();
+        test_assert_same(['auth', 'login'], $app->parseUrl());
+        unset($_GET['url']);
+    },
+
     'csrf tokens survive missing form-state session' => function ($root) {
         require_once $root . '/app/init.php';
 

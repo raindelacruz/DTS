@@ -43,7 +43,12 @@ class App {
 
     public function parseUrl() {
         if(isset($_GET['url'])) {
-            return explode('/', filter_var(rtrim($_GET['url'], '/'), FILTER_SANITIZE_URL));
+            $url = filter_var(rtrim((string) $_GET['url'], '/'), FILTER_SANITIZE_URL);
+            $parts = array_values(array_filter(explode('/', $url), static function ($part) {
+                return $part !== '';
+            }));
+
+            return !empty($parts) ? $parts : ['auth', 'login'];
         }
 
         return ['auth', 'login'];
