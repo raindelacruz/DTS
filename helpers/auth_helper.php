@@ -347,24 +347,100 @@ function ensureCsrfToken()
     return $_SESSION['csrf_token'];
 }
 
-function csrfToken()
+function base64UrlEncode($value)
 {
-    return ensureCsrfToken();
+    return rtrim(strtr(base64_encode((string) $value), '+/', '-_'), '=');
 }
 
-function csrfInput()
+function base64UrlDecode($value)
 {
-    return '<input type="hidden" name="csrf_token" value="' . htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') . '">';
+    $value = (string) $value;
+    $padding = strlen($value) % 4;
+    if ($padding > 0) {
+        $value .= str_repeat('=', 4 - $padding);
+    }
+
+    return base64_decode(strtr($value, '-_', '+/'), true);
 }
 
-function validateCsrfToken($token)
+function csrfClientBinding()
 {
+    $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+    return hash('sha256', clientIpAddress() . '|' . $userAgent);
+}
+
+function signedCsrfToken($context = 'default')
+{
+    $payload = json_encode([
+        'context' => (string) $context,
+        'issued_at' => time(),
+        'nonce' => bin2hex(random_bytes(16))
+    ], JSON_UNESCAPED_SLASHES);
+
+    if ($payload === false) {
+        throw new RuntimeException('CSRF token generation failed.');
+    }
+
+    $encodedPayload = base64UrlEncode($payload);
+    $signature = hash_hmac('sha256', $encodedPayload . '|' . csrfClientBinding(), APP_KEY);
+
+    return 'v2.' . $encodedPayload . '.' . $signature;
+}
+
+function validateSignedCsrfToken($token, $context = 'default')
+{
+    $parts = explode('.', (string) $token);
+    if (count($parts) !== 3 || $parts[0] !== 'v2') {
+        return false;
+    }
+
+    [$version, $encodedPayload, $signature] = $parts;
+    $expectedSignature = hash_hmac('sha256', $encodedPayload . '|' . csrfClientBinding(), APP_KEY);
+    if (!hash_equals($expectedSignature, $signature)) {
+        return false;
+    }
+
+    $decodedPayload = base64UrlDecode($encodedPayload);
+    if ($decodedPayload === false) {
+        return false;
+    }
+
+    $payload = json_decode($decodedPayload, true);
+    if (!is_array($payload)) {
+        return false;
+    }
+
+    $issuedAt = (int) ($payload['issued_at'] ?? 0);
+    if ($issuedAt <= 0 || $issuedAt > time() + 60 || time() - $issuedAt > 7200) {
+        return false;
+    }
+
+    return hash_equals((string) ($payload['context'] ?? ''), (string) $context);
+}
+
+function csrfToken($context = 'default')
+{
+    ensureCsrfToken();
+    return signedCsrfToken($context);
+}
+
+function csrfInput($context = 'default')
+{
+    return '<input type="hidden" name="csrf_token" value="' . htmlspecialchars(csrfToken($context), ENT_QUOTES, 'UTF-8') . '">';
+}
+
+function validateCsrfToken($token, $context = 'default')
+{
+    if (validateSignedCsrfToken($token, $context)) {
+        return true;
+    }
+
     return isset($_SESSION['csrf_token']) && is_string($token) && hash_equals($_SESSION['csrf_token'], $token);
 }
 
-function validateCsrfOrFail()
+function validateCsrfOrFail($context = 'default')
 {
-    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '', $context)) {
         throw new ValidationException('Your session expired. Please try again.', [
             '_global' => 'Your session expired. Please submit the form again.'
         ]);

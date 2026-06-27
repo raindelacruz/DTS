@@ -124,7 +124,7 @@ class Auth extends Controller
 
             try {
                 $phase = 'csrf';
-                validateCsrfOrFail();
+                validateCsrfOrFail('login');
 
                 $password = trim($_POST['password'] ?? '');
                 $errors = [];

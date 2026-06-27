@@ -207,7 +207,7 @@
         <?php endif; ?>
 
         <form action="" method="POST">
-            <?php echo csrfInput(); ?>
+            <?php echo csrfInput('login'); ?>
             <div class="field">
                 <label for="id_number">ID Number</label>
                 <input id="id_number" type="text" name="id_number" value="<?php echo htmlspecialchars($data['values']['id_number'] ?? ''); ?>" class="<?php echo !empty($data['errors']['id_number']) ? 'is-invalid' : ''; ?>" required>

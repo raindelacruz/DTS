@@ -25,6 +25,21 @@ return [
         test_assert_same('/', APP_COOKIE_PATH, 'MFA trusted-device cookies must be sent on root-routed production URLs.');
     },
 
+    'csrf tokens survive missing form-state session' => function ($root) {
+        require_once $root . '/app/init.php';
+
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+        $_SERVER['HTTP_USER_AGENT'] = 'DTS test browser';
+        $_SESSION = [];
+
+        $token = csrfToken('login');
+        unset($_SESSION['csrf_token']);
+
+        test_assert(validateCsrfToken($token, 'login'), 'Signed CSRF token should validate without the session-stored token.');
+        test_assert(!validateCsrfToken($token . 'tampered', 'login'), 'Tampered CSRF token should fail.');
+        test_assert(!validateCsrfToken($token, 'profile'), 'CSRF token should not validate for a different context.');
+    },
+
     'sensitive value encryption round trips' => function ($root) {
         require_once $root . '/app/init.php';
 
