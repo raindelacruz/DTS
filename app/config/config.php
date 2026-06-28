@@ -78,6 +78,7 @@ define('REQUIRE_MALWARE_SCAN', filter_var(getenv('REQUIRE_MALWARE_SCAN') ?: '0',
 define('MALWARE_SCAN_COMMAND', trim((string) (getenv('MALWARE_SCAN_COMMAND') ?: '')));
 define('UPLOAD_STORAGE_QUOTA_MB', max(100, (int) (getenv('UPLOAD_STORAGE_QUOTA_MB') ?: 10240)));
 define('PASSWORD_RESET_FROM', trim((string) (getenv('PASSWORD_RESET_FROM') ?: 'no-reply@localhost')));
+define('PASSWORD_RESET_ENABLED', filter_var(getenv('PASSWORD_RESET_ENABLED') ?: 'false', FILTER_VALIDATE_BOOLEAN));
 define('SMTP_HOST', trim((string) (getenv('SMTP_HOST') ?: '')));
 define('SMTP_PORT', max(1, (int) (getenv('SMTP_PORT') ?: 587)));
 define('SMTP_USER', trim((string) (getenv('SMTP_USER') ?: '')));

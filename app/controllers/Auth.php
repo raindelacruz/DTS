@@ -637,10 +637,9 @@ class Auth extends Controller
 
     public function forgotPassword()
     {
-        $message = 'Forgot password is temporarily disabled while this feature is work in progress.';
+        $message = PASSWORD_RESET_ENABLED ? '' : 'Forgot password is temporarily disabled.';
         $developmentResetUrl = '';
-        $disabled = true;
-        if (!$disabled && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+        if (PASSWORD_RESET_ENABLED && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             validateCsrfOrFail();
             $email = strtolower(trim($_POST['email'] ?? ''));
             $user = filter_var($email, FILTER_VALIDATE_EMAIL) ? $this->users()->findByEmail($email) : null;
