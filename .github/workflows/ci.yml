@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - "codex/**"
+
+jobs:
+  php:
+    name: PHP lint, tests, and migration smoke
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: dts_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      APP_ENV: testing
+      APP_URL: http://localhost
+      APP_KEY: ci-only-ci-only-ci-only-ci-only
+      DB_HOST: 127.0.0.1
+      DB_USER: root
+      DB_PASS: root
+      DB_NAME: dts_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: pdo_mysql, fileinfo, openssl, zip
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: PHP syntax lint
+        run: find app helpers public database tests scripts -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l
+
+      - name: Import baseline schema if present
+        run: |
+          if [ -f dts_db.sql ]; then
+            mysql -h127.0.0.1 -uroot -proot dts_ci < dts_db.sql
+          fi
+
+      - name: Run migrations
+        run: php database/migrate.php
+
+      - name: Run unit tests
+        run: php tests/run.php
+
+      - name: Run database integration tests
+        env:
+          RUN_DB_TESTS: "1"
+        run: php tests/run.php
+
+      - name: Dependency audit
+        run: composer audit --locked --no-interaction
+
+  node:
+    name: JavaScript dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev

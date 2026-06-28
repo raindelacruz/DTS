@@ -1,0 +1,25 @@
+{
+    "name": "nfa/document-tracking-system",
+    "description": "NFA Document Tracking System",
+    "license": "proprietary",
+    "type": "project",
+    "require": {
+        "php": "^8.2",
+        "ext-fileinfo": "*",
+        "ext-openssl": "*",
+        "ext-pdo": "*",
+        "setasign/fpdi": "^2.6",
+        "tecnickcom/tcpdf": "^6.10"
+    },
+    "config": {
+        "allow-plugins": false,
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "php tests/run.php",
+        "test:db": "php -r \"putenv('RUN_DB_TESTS=1'); require 'tests/run.php';\"",
+        "migrate": "php database/migrate.php",
+        "reconcile": "php scripts/reconcile.php"
+    }
+}
