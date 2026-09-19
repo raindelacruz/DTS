@@ -15,6 +15,57 @@ class Document
             ]
         );
 
+        $this->ensureUnitAssignmentSchema();
+    }
+
+    private function ensureUnitAssignmentSchema()
+    {
+        $this->db->exec("
+            CREATE TABLE IF NOT EXISTS document_assignments (
+                id INT(11) NOT NULL AUTO_INCREMENT,
+                document_id INT(11) NOT NULL,
+                assigned_by_user_id INT(11) NOT NULL,
+                assigned_by_department_id INT(11) NOT NULL,
+                assigned_to_user_id INT(11) NOT NULL,
+                assigned_to_department_id INT(11) NOT NULL,
+                assignment_type ENUM('INTERNAL') NOT NULL DEFAULT 'INTERNAL',
+                instructions TEXT DEFAULT NULL,
+                status ENUM('Pending','Received','Completed','Confirmed','Returned','Cancelled') NOT NULL DEFAULT 'Pending',
+                assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME DEFAULT NULL,
+                completed_by INT(11) DEFAULT NULL,
+                completion_attachment VARCHAR(255) DEFAULT NULL,
+                returned_at DATETIME DEFAULT NULL,
+                return_remarks TEXT DEFAULT NULL,
+                PRIMARY KEY (id),
+                KEY idx_document_assignments_document (document_id),
+                KEY idx_document_assignments_assignee (assigned_to_user_id),
+                KEY idx_document_assignments_department (assigned_to_department_id),
+                KEY idx_document_assignments_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        if (!$this->columnExists('document_assignments', 'parent_assignment_id')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                ADD COLUMN parent_assignment_id INT(11) DEFAULT NULL
+                AFTER document_id
+            ");
+        }
+
+        if (!$this->indexExists('document_assignments', 'idx_document_assignments_parent')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                ADD KEY idx_document_assignments_parent (parent_assignment_id)
+            ");
+        }
+
+        if (!$this->enumColumnIncludes('document_assignments', 'assignment_type', 'UNIT')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                MODIFY assignment_type ENUM('INTERNAL','UNIT') NOT NULL DEFAULT 'INTERNAL'
+            ");
+        }
     }
 
     private function ensureRoutingTable()
@@ -250,6 +301,21 @@ class Document
                 AFTER returned_at
             ");
         }
+
+        if (!$this->columnExists('document_assignments', 'parent_assignment_id')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                ADD COLUMN parent_assignment_id INT(11) DEFAULT NULL
+                AFTER document_id
+            ");
+        }
+
+        if (!$this->enumColumnIncludes('document_assignments', 'assignment_type', 'UNIT')) {
+            $this->db->exec("
+                ALTER TABLE document_assignments
+                MODIFY assignment_type ENUM('INTERNAL','UNIT') NOT NULL DEFAULT 'INTERNAL'
+            ");
+        }
     }
 
     private function generateQrToken()
@@ -477,9 +543,37 @@ class Document
         return (int) $stmt->fetchColumn() === 0;
     }
 
-    private function visibilityWhereClause()
+    private function personalVisibilityWhereClause()
     {
         return "
+            (
+                d.created_by = :visibility_user_id
+                OR d.released_by = :visibility_user_id
+                OR d.received_by = :visibility_user_id
+                OR EXISTS (
+                    SELECT 1
+                    FROM document_logs personal_logs
+                    WHERE personal_logs.document_id = d.id
+                    AND personal_logs.action_by = :visibility_user_id
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM document_assignments personal_assignments
+                    WHERE personal_assignments.document_id = d.id
+                    AND (
+                        personal_assignments.assigned_by_user_id = :visibility_user_id
+                        OR personal_assignments.assigned_to_user_id = :visibility_user_id
+                        OR personal_assignments.completed_by = :visibility_user_id
+                    )
+                    AND personal_assignments.status IN ('Pending','Received','Completed','Confirmed','Returned')
+                )
+            )
+        ";
+    }
+
+    private function visibilityWhereClause($currentUserId = null)
+    {
+        $departmentVisibility = "
             (
                 d.origin_department_id = :visibility_dept_origin
                 OR EXISTS (
@@ -487,6 +581,13 @@ class Document
                     FROM document_logs l
                     WHERE l.document_id = d.id
                     AND l.department_id = :visibility_dept_log
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM document_assignments a
+                    WHERE a.document_id = d.id
+                    AND a.assigned_to_department_id = :visibility_dept_assignment
+                    AND a.status IN ('Pending','Received','Completed','Confirmed','Returned')
                 )
                 OR (
                     d.status NOT IN ('Draft', 'Cancelled')
@@ -534,30 +635,62 @@ class Document
                 )
             )
         ";
+
+        if ((int) $currentUserId <= 0) {
+            return $departmentVisibility;
+        }
+
+        return '(' . $departmentVisibility . ' OR ' . $this->personalVisibilityWhereClause() . ')';
     }
 
-    private function visibilityParams($departmentId)
+    private function visibilityParams($departmentId, $currentUserId = null)
     {
         $departmentId = (int) $departmentId;
-        return [
+        $params = [
             'visibility_dept_origin' => $departmentId,
             'visibility_dept_log' => $departmentId,
+            'visibility_dept_assignment' => $departmentId,
             'visibility_dept_thru' => $departmentId,
             'visibility_dept_target' => $departmentId,
             'visibility_dept_destination' => $departmentId
         ];
+
+        if ((int) $currentUserId > 0) {
+            $params['visibility_user_id'] = (int) $currentUserId;
+        }
+
+        return $params;
     }
 
-    public function canDepartmentViewDocument($documentId, $departmentId)
+    public function canDepartmentViewDocument($documentId, $departmentId, $currentUserId = null)
     {
         $sql = "
             SELECT COUNT(*)
             FROM documents d
             WHERE d.id = :document_id
-            AND " . $this->visibilityWhereClause();
+            AND " . $this->visibilityWhereClause($currentUserId);
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute(array_merge(['document_id' => $documentId], $this->visibilityParams($departmentId)));
+        $stmt->execute(array_merge(['document_id' => $documentId], $this->visibilityParams($departmentId, $currentUserId)));
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function canUserViewPersonalDocument($documentId, $userId)
+    {
+        if ((int) $userId <= 0) {
+            return false;
+        }
+
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM documents d
+            WHERE d.id = :document_id
+            AND " . $this->personalVisibilityWhereClause());
+        $stmt->execute([
+            'document_id' => (int) $documentId,
+            'visibility_user_id' => (int) $userId
+        ]);
 
         return (int) $stmt->fetchColumn() > 0;
     }
@@ -1844,7 +1977,7 @@ class Document
         return $sql;
     }
 
-    public function paginateForDepartment($departmentId, $filters, $scope, $page, $perPage, $managerUserId = null)
+    public function paginateForDepartment($departmentId, $filters, $scope, $page, $perPage, $managerUserId = null, $currentUserId = null)
     {
         $departmentId = (int) $departmentId;
         $params = [];
@@ -1866,8 +1999,8 @@ class Document
             $params['destination_department_id'] = $departmentId;
         } else {
             $from = 'FROM documents d';
-            $where = 'WHERE ' . $this->visibilityWhereClause();
-            $params = array_merge($params, $this->visibilityParams($departmentId));
+            $where = 'WHERE ' . $this->visibilityWhereClause($currentUserId);
+            $params = array_merge($params, $this->visibilityParams($departmentId, $currentUserId));
         }
 
         $where .= $this->buildDocumentFilterClause($filters, $params);
@@ -1875,10 +2008,26 @@ class Document
             $where .= " AND (d.origin_department_id = :manager_department_id OR EXISTS (
                 SELECT 1 FROM document_logs ml
                 WHERE ml.document_id = d.id AND ml.department_id = :manager_department_id2 AND ml.action_by <> :manager_user_id
-            ))";
+            ) OR EXISTS (
+                SELECT 1 FROM document_logs mpl
+                WHERE mpl.document_id = d.id AND mpl.action_by = :manager_personal_user_id
+            ) OR EXISTS (
+                SELECT 1 FROM document_assignments mpa
+                WHERE mpa.document_id = d.id
+                AND (
+                    mpa.assigned_by_user_id = :manager_personal_user_id
+                    OR mpa.assigned_to_user_id = :manager_personal_user_id
+                    OR mpa.completed_by = :manager_personal_user_id
+                )
+                AND mpa.status IN ('Pending','Received','Completed','Confirmed','Returned')
+            ) OR d.created_by = :manager_personal_user_id
+                OR d.released_by = :manager_personal_user_id
+                OR d.received_by = :manager_personal_user_id
+            )";
             $params['manager_department_id'] = $departmentId;
             $params['manager_department_id2'] = $departmentId;
             $params['manager_user_id'] = (int) $managerUserId;
+            $params['manager_personal_user_id'] = (int) ($currentUserId ?: $managerUserId);
         }
 
         $countStmt = $this->db->prepare("SELECT COUNT(DISTINCT d.id) {$from} {$where}");
@@ -2340,6 +2489,60 @@ class Document
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    public function getActiveManagersByChildUnits($division_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                u.id,
+                u.firstname,
+                u.middle_initial,
+                u.lastname,
+                u.email,
+                u.department_id,
+                d.division_name AS unit_name
+            FROM users u
+            JOIN departments d ON d.id = u.department_id
+            WHERE d.parent_id = :division_id
+            AND d.office_level = 'unit'
+            AND u.role = 'manager'
+            AND u.status = 'active'
+            ORDER BY d.division_name ASC, u.lastname ASC, u.firstname ASC
+        ");
+
+        $stmt->execute(['division_id' => (int) $division_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function findActiveManagerInChildUnit($user_id, $division_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                u.id,
+                u.firstname,
+                u.middle_initial,
+                u.lastname,
+                u.email,
+                u.department_id,
+                d.division_name AS unit_name
+            FROM users u
+            JOIN departments d ON d.id = u.department_id
+            WHERE u.id = :user_id
+            AND d.parent_id = :division_id
+            AND d.office_level = 'unit'
+            AND u.role = 'manager'
+            AND u.status = 'active'
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'user_id' => (int) $user_id,
+            'division_id' => (int) $division_id
+        ]);
+
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $user ?: null;
+    }
+
     public function findActiveStaffInDepartment($user_id, $department_id)
     {
         $stmt = $this->db->prepare("
@@ -2467,7 +2670,7 @@ class Document
             FROM document_assignments
             WHERE document_id = :document_id
             AND assigned_to_user_id = :user_id
-            AND assignment_type = 'INTERNAL'
+            AND assignment_type IN ('INTERNAL','UNIT')
             AND status IN ('Pending','Received','Returned')
             ORDER BY assigned_at DESC, id DESC
             LIMIT 1
@@ -2476,6 +2679,95 @@ class Document
         $stmt->execute([
             'document_id' => (int) $document_id,
             'user_id' => (int) $user_id
+        ]);
+
+        $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $assignment ?: null;
+    }
+
+    public function getCurrentUnitAssignmentForManager($document_id, $user_id, $unit_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT *
+            FROM document_assignments
+            WHERE document_id = :document_id
+            AND assigned_to_user_id = :user_id
+            AND assigned_to_department_id = :unit_id
+            AND assignment_type = 'UNIT'
+            AND status IN ('Pending','Received','Returned')
+            ORDER BY assigned_at DESC, id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'document_id' => (int) $document_id,
+            'user_id' => (int) $user_id,
+            'unit_id' => (int) $unit_id
+        ]);
+
+        $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $assignment ?: null;
+    }
+
+    public function getAssignmentById($assignment_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT *
+            FROM document_assignments
+            WHERE id = :assignment_id
+            LIMIT 1
+        ");
+
+        $stmt->execute(['assignment_id' => (int) $assignment_id]);
+        $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $assignment ?: null;
+    }
+
+    public function getCurrentUnitAssignmentForDivision($document_id, $division_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT
+                da.*,
+                unit.division_name AS assigned_to_unit_name,
+                CONCAT(u.firstname, ' ', IFNULL(CONCAT(u.middle_initial, '. '), ''), u.lastname) AS assigned_to_name,
+                CONCAT(assigner.firstname, ' ', IFNULL(CONCAT(assigner.middle_initial, '. '), ''), assigner.lastname) AS assigned_by_name
+            FROM document_assignments da
+            JOIN users u ON da.assigned_to_user_id = u.id
+            JOIN users assigner ON da.assigned_by_user_id = assigner.id
+            JOIN departments unit ON unit.id = da.assigned_to_department_id
+            WHERE da.document_id = :document_id
+            AND da.assigned_by_department_id = :division_id
+            AND da.assignment_type = 'UNIT'
+            AND da.status IN ('Pending','Received','Completed','Confirmed','Returned')
+            ORDER BY FIELD(da.status, 'Pending', 'Received', 'Completed', 'Confirmed', 'Returned'), da.assigned_at DESC, da.id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'document_id' => (int) $document_id,
+            'division_id' => (int) $division_id
+        ]);
+
+        $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $assignment ?: null;
+    }
+
+    public function getActiveChildInternalAssignment($document_id, $parent_assignment_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT *
+            FROM document_assignments
+            WHERE document_id = :document_id
+            AND parent_assignment_id = :parent_assignment_id
+            AND assignment_type = 'INTERNAL'
+            AND status IN ('Pending','Received','Completed','Returned')
+            ORDER BY FIELD(status, 'Pending', 'Received', 'Completed', 'Returned'), assigned_at DESC, id DESC
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            'document_id' => (int) $document_id,
+            'parent_assignment_id' => (int) $parent_assignment_id
         ]);
 
         $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -2571,7 +2863,7 @@ class Document
         }
     }
 
-    public function assignDocumentInternallyToStaff($document_id, $assigned_to_user_ids, $assigned_by_user_id, $department_id, $instructions = '')
+    public function assignDocumentInternallyToStaff($document_id, $assigned_to_user_ids, $assigned_by_user_id, $department_id, $instructions = '', $parentAssignmentId = null)
     {
         $assignedToUserIds = array_values(array_unique(array_filter(array_map('intval', (array) $assigned_to_user_ids))));
 
@@ -2606,18 +2898,20 @@ class Document
             ]);
 
             $insert = $this->db->prepare("
-                INSERT INTO document_assignments (
-                    document_id,
-                    assigned_by_user_id,
+                    INSERT INTO document_assignments (
+                        document_id,
+                        parent_assignment_id,
+                        assigned_by_user_id,
                     assigned_by_department_id,
                     assigned_to_user_id,
                     assigned_to_department_id,
                     assignment_type,
                     instructions,
-                    status
-                ) VALUES (
-                    :document_id,
-                    :assigned_by_user_id,
+                        status
+                    ) VALUES (
+                        :document_id,
+                        :parent_assignment_id,
+                        :assigned_by_user_id,
                     :assigned_by_department_id,
                     :assigned_to_user_id,
                     :assigned_to_department_id,
@@ -2631,6 +2925,7 @@ class Document
             foreach ($assignedToUserIds as $staffId) {
                 $insert->execute([
                     'document_id' => (int) $document_id,
+                    'parent_assignment_id' => $parentAssignmentId !== null ? (int) $parentAssignmentId : null,
                     'assigned_by_user_id' => (int) $assigned_by_user_id,
                     'assigned_by_department_id' => (int) $department_id,
                     'assigned_to_user_id' => (int) $staffId,
@@ -2656,6 +2951,110 @@ class Document
                 'Internally Delegated',
                 $assigned_by_user_id,
                 $department_id,
+                $remarks
+            );
+
+            $this->db->commit();
+            return [
+                'assignment_ids' => $assignmentIds,
+                'assignees' => array_values($assignees)
+            ];
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function assignDocumentInternallyToUnitManagers($document_id, $assigned_to_user_ids, $assigned_by_user_id, $division_id, $instructions = '')
+    {
+        $assignedToUserIds = array_values(array_unique(array_filter(array_map('intval', (array) $assigned_to_user_ids))));
+
+        if (empty($assignedToUserIds)) {
+            throw new Exception('Select active unit managers under your division.');
+        }
+
+        try {
+            $this->db->beginTransaction();
+
+            $assignees = [];
+            foreach ($assignedToUserIds as $managerId) {
+                $assignee = $this->findActiveManagerInChildUnit($managerId, $division_id);
+                if (!$assignee) {
+                    throw new Exception('Select active unit managers under your division.');
+                }
+                $assignees[$managerId] = $assignee;
+            }
+
+            $cancelExisting = $this->db->prepare("
+                UPDATE document_assignments da
+                JOIN departments d ON d.id = da.assigned_to_department_id
+                SET da.status = 'Cancelled'
+                WHERE da.document_id = :document_id
+                AND da.assigned_by_department_id = :division_id
+                AND da.assignment_type = 'UNIT'
+                AND d.parent_id = :division_id_for_units
+                AND da.status = 'Pending'
+            ");
+
+            $cancelExisting->execute([
+                'document_id' => (int) $document_id,
+                'division_id' => (int) $division_id,
+                'division_id_for_units' => (int) $division_id
+            ]);
+
+            $insert = $this->db->prepare("
+                INSERT INTO document_assignments (
+                    document_id,
+                    assigned_by_user_id,
+                    assigned_by_department_id,
+                    assigned_to_user_id,
+                    assigned_to_department_id,
+                    assignment_type,
+                    instructions,
+                    status
+                ) VALUES (
+                    :document_id,
+                    :assigned_by_user_id,
+                    :assigned_by_department_id,
+                    :assigned_to_user_id,
+                    :assigned_to_department_id,
+                    'UNIT',
+                    :instructions,
+                    'Pending'
+                )
+            ");
+
+            $assignmentIds = [];
+            foreach ($assignees as $assignee) {
+                $insert->execute([
+                    'document_id' => (int) $document_id,
+                    'assigned_by_user_id' => (int) $assigned_by_user_id,
+                    'assigned_by_department_id' => (int) $division_id,
+                    'assigned_to_user_id' => (int) $assignee['id'],
+                    'assigned_to_department_id' => (int) $assignee['department_id'],
+                    'instructions' => trim((string) $instructions) !== '' ? trim((string) $instructions) : null
+                ]);
+                $assignmentIds[] = (int) $this->db->lastInsertId();
+            }
+
+            $unitNames = array_map(function ($assignee) {
+                return ($assignee['unit_name'] ?? 'Unit') . ' - ' . $this->formatUserName($assignee);
+            }, array_values($assignees));
+            $remarks = count($unitNames) === 1
+                ? 'Assigned to ' . $unitNames[0]
+                : 'Assigned to ' . count($unitNames) . ' unit managers: ' . implode(', ', $unitNames);
+            $instructions = trim((string) $instructions);
+            if ($instructions !== '') {
+                $remarks .= "\nInstruction: " . $instructions;
+            }
+
+            $this->addDocumentLog(
+                $document_id,
+                'Delegated to Unit',
+                $assigned_by_user_id,
+                $division_id,
                 $remarks
             );
 
@@ -2832,6 +3231,49 @@ class Document
         }
     }
 
+    public function returnUnitAssignment($document_id, $division_id, $manager_user_id, $remarks)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $assignment = $this->getCurrentUnitAssignmentForDivision($document_id, $division_id);
+            if (!$assignment || ($assignment['status'] ?? '') !== 'Completed') {
+                throw new Exception('No completed unit assignment is available to return.');
+            }
+
+            $update = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Returned',
+                    returned_at = NOW(),
+                    return_remarks = :return_remarks
+                WHERE id = :id
+                AND assignment_type = 'UNIT'
+                AND status = 'Completed'
+            ");
+
+            $update->execute([
+                'id' => (int) $assignment['id'],
+                'return_remarks' => trim((string) $remarks)
+            ]);
+
+            $this->addDocumentLog(
+                $document_id,
+                'Unit Assignment Returned',
+                $manager_user_id,
+                $division_id,
+                trim((string) $remarks)
+            );
+
+            $this->db->commit();
+            return (int) $assignment['assigned_to_user_id'];
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     public function internalAssignmentLogHasAttachment($document_id, $department_id, $filename)
     {
         $stmt = $this->db->prepare("
@@ -2873,12 +3315,78 @@ class Document
                 'id' => (int) $assignment['id']
             ]);
 
+            if (!empty($assignment['parent_assignment_id'])) {
+                $parentUpdate = $this->db->prepare("
+                    UPDATE document_assignments
+                    SET status = 'Completed',
+                        completed_at = NOW(),
+                        completed_by = :completed_by,
+                        completion_attachment = :completion_attachment,
+                        returned_at = NULL,
+                        return_remarks = NULL
+                    WHERE id = :id
+                    AND assignment_type = 'UNIT'
+                    AND status IN ('Pending','Received','Returned')
+                ");
+                $parentUpdate->execute([
+                    'id' => (int) $assignment['parent_assignment_id'],
+                    'completed_by' => (int) $manager_user_id,
+                    'completion_attachment' => $assignment['completion_attachment'] ?? null
+                ]);
+
+                $this->addDocumentLog(
+                    $document_id,
+                    'Unit Assignment Completed',
+                    $manager_user_id,
+                    $department_id,
+                    'Unit assignment completion confirmed by unit manager'
+                );
+            }
+
             $this->addDocumentLog(
                 $document_id,
                 'Internal Assignment Confirmed',
                 $manager_user_id,
                 $department_id,
                 'Internal assignment completion confirmed by manager'
+            );
+
+            $this->db->commit();
+            return (int) $assignment['assigned_to_user_id'];
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function confirmUnitAssignment($document_id, $division_id, $manager_user_id)
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $assignment = $this->getCurrentUnitAssignmentForDivision($document_id, $division_id);
+            if (!$assignment || ($assignment['status'] ?? '') !== 'Completed') {
+                throw new Exception('No completed unit assignment is available to confirm.');
+            }
+
+            $update = $this->db->prepare("
+                UPDATE document_assignments
+                SET status = 'Confirmed'
+                WHERE id = :id
+                AND assignment_type = 'UNIT'
+                AND status = 'Completed'
+            ");
+
+            $update->execute(['id' => (int) $assignment['id']]);
+
+            $this->addDocumentLog(
+                $document_id,
+                'Unit Assignment Confirmed',
+                $manager_user_id,
+                $division_id,
+                'Unit assignment completion confirmed by division manager'
             );
 
             $this->db->commit();
@@ -3015,4 +3523,3 @@ class Document
         ]);
     }
 }
-

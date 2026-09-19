@@ -29,8 +29,9 @@ $filters = $data['filters'] ?? [];
             <select id="department_filter" name="department_id" class="form-select">
                 <option value="0">All Departments</option>
                 <?php foreach (($data['departments'] ?? []) as $department): ?>
+                    <?php $officeLevel = ucfirst((string) ($department['office_level'] ?? 'department')); ?>
                     <option value="<?php echo (int) $department['id']; ?>" <?php echo ((int) ($filters['department_id'] ?? 0) === (int) $department['id']) ? 'selected' : ''; ?>>
-                        <?php echo htmlspecialchars($department['division_name']); ?>
+                        <?php echo htmlspecialchars($department['division_name'] . ' (' . $officeLevel . ')'); ?>
                     </option>
                 <?php endforeach; ?>
             </select>

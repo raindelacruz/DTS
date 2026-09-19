@@ -4,11 +4,6 @@
     <div><h1 class="section-title">My Profile</h1></div>
 </div>
 
-<div class="instruction-card">
-    <h3>Quick Guide</h3>
-    <p>Use this page to keep your <strong>email address</strong> and <strong>password</strong> current. Department assignments are managed by administrators so document access remains controlled.</p>
-</div>
-
 <?php if (!empty($data['success'])): ?><div class="alert alert-success app-card border-0 mb-4"><?php echo htmlspecialchars($data['success']); ?></div><?php endif; ?>
 <?php if (!empty($data['error'])): ?><div class="alert alert-danger app-card border-0 mb-4"><?php echo htmlspecialchars($data['error']); ?></div><?php endif; ?>
 <?php if (!empty($data['message'])): ?><div class="alert alert-danger app-card border-0 mb-4"><?php echo htmlspecialchars($data['message']); ?></div><?php endif; ?>

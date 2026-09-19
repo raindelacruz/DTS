@@ -11,6 +11,17 @@ return [
         test_assert_same([], $errors, 'Strong password should satisfy the configured policy.');
     },
 
+    'login ip throttle has separate higher threshold' => function ($root) {
+        require_once $root . '/app/init.php';
+
+        $config = file_get_contents($root . '/app/config/config.php');
+        $security = file_get_contents($root . '/app/lib/SecurityService.php');
+
+        test_assert(strpos($config, 'LOGIN_IP_MAX_ATTEMPTS') !== false, 'A shared IP login throttle threshold should be configurable.');
+        test_assert(LOGIN_IP_MAX_ATTEMPTS > LOGIN_MAX_ATTEMPTS, 'The shared IP login threshold should allow normal multi-account testing.');
+        test_assert(strpos($security, 'LOGIN_IP_MAX_ATTEMPTS') !== false, 'The IP bucket should use the shared IP threshold.');
+    },
+
     'safe redirects allow local paths only' => function ($root) {
         require_once $root . '/app/init.php';
 

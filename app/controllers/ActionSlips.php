@@ -44,6 +44,16 @@ class ActionSlips extends Controller
         return $this->departmentModel->isParentDepartment((int) ($departmentId ?? $this->currentDepartmentId()));
     }
 
+    private function isDivision($departmentId = null)
+    {
+        return $this->departmentModel->isDivision((int) ($departmentId ?? $this->currentDepartmentId()));
+    }
+
+    private function isUnit($departmentId = null)
+    {
+        return $this->departmentModel->isUnit((int) ($departmentId ?? $this->currentDepartmentId()));
+    }
+
     private function getFilters()
     {
         return [
@@ -61,6 +71,7 @@ class ActionSlips extends Controller
         $receivingLevel = $this->isParentDepartment() ? 'Department' : 'Staff';
 
         return [
+            'title' => '',
             'date_received' => date('Y-m-d'),
             'urgent' => 0,
             'receiving_level' => $receivingLevel,
@@ -109,7 +120,7 @@ class ActionSlips extends Controller
     private function getAllDivisions()
     {
         return array_values(array_filter($this->departmentModel->getAll(), function ($department) {
-            return !empty($department['parent_id']);
+            return ($department['office_level'] ?? '') === 'division';
         }));
     }
 
@@ -201,6 +212,7 @@ class ActionSlips extends Controller
     public function store()
     {
         $values = [
+            'title' => trim($_POST['title'] ?? ''),
             'date_received' => trim($_POST['date_received'] ?? ''),
             'urgent' => !empty($_POST['urgent']) ? 1 : 0,
             'receiving_level' => trim($_POST['receiving_level'] ?? 'Department'),
@@ -249,43 +261,57 @@ class ActionSlips extends Controller
             $createdSlipIds = [];
 
             if ($values['receiving_level'] === 'Staff') {
+                $firstStaffId = (int) array_shift($values['assigned_staff_ids']);
+                $slipValues = $values;
+                $slipValues['assigned_staff_id'] = $firstStaffId;
+                $slipValues['target_staff_department_id'] = $this->findStaffDepartmentInCurrentScope($firstStaffId);
+                $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
+                $slipId = $this->slipModel->create($slipValues + [
+                    'attachment' => $attachment,
+                    'created_by' => $this->currentUserId(),
+                    'actor_department_id' => $this->currentDepartmentId()
+                ]);
+                $createdSlipIds[] = $slipId;
+                $this->notificationModel->create($firstStaffId, 'Action slip released', 'An action slip was released to you.', '/actionSlips/show/' . $slipId);
+
                 foreach ($values['assigned_staff_ids'] as $staffId) {
-                    $slipValues = $values;
-                    $slipValues['assigned_staff_id'] = (int) $staffId;
-                    $slipValues['target_staff_department_id'] = $this->findStaffDepartmentInCurrentScope((int) $staffId);
-                    $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
-                    $slipId = $this->slipModel->create($slipValues + [
-                        'attachment' => $attachment,
-                        'created_by' => $this->currentUserId(),
-                        'actor_department_id' => $this->currentDepartmentId()
-                    ]);
-                    $createdSlipIds[] = $slipId;
-                    $this->notificationModel->create((int) $staffId, 'Action slip released', 'A new action slip was released to you.', '/actionSlips/show/' . $slipId);
+                    $this->slipModel->delegateToStaff($slipId, (int) $staffId, $this->currentUserId(), $this->currentDepartmentId(), $values['remarks']);
+                    $this->notificationModel->create((int) $staffId, 'Action slip released', 'An action slip was released to you.', '/actionSlips/show/' . $slipId);
                 }
             } elseif ($values['receiving_level'] === 'Division') {
+                $firstDivisionId = (int) array_shift($values['receiving_division_ids']);
+                $slipValues = $values;
+                $slipValues['receiving_division_id'] = $firstDivisionId;
+                $slipValues['receiving_division_ids'] = [$firstDivisionId];
+                $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
+                $slipId = $this->slipModel->create($slipValues + [
+                    'attachment' => $attachment,
+                    'created_by' => $this->currentUserId(),
+                    'actor_department_id' => $this->currentDepartmentId()
+                ]);
+                $createdSlipIds[] = $slipId;
+                $this->notificationModel->notifyDepartmentManagers([$firstDivisionId], 'Action slip released', 'A new action slip was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+
                 foreach ($values['receiving_division_ids'] as $divisionId) {
-                    $slipValues = $values;
-                    $slipValues['receiving_division_id'] = (int) $divisionId;
-                    $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
-                    $slipId = $this->slipModel->create($slipValues + [
-                        'attachment' => $attachment,
-                        'created_by' => $this->currentUserId(),
-                        'actor_department_id' => $this->currentDepartmentId()
-                    ]);
-                    $createdSlipIds[] = $slipId;
+                    $this->slipModel->delegateToDivision($slipId, (int) $divisionId, $this->currentUserId(), $this->currentDepartmentId(), $values['remarks'], DepartmentActionSlip::STATUS_RELEASED, 'Released to Division');
                     $this->notificationModel->notifyDepartmentManagers([(int) $divisionId], 'Action slip released', 'A new action slip was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
                 }
             } else {
+                $firstDepartmentId = (int) array_shift($values['receiving_department_ids']);
+                $slipValues = $values;
+                $slipValues['receiving_department_id'] = $firstDepartmentId;
+                $slipValues['receiving_department_ids'] = [$firstDepartmentId];
+                $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
+                $slipId = $this->slipModel->create($slipValues + [
+                    'attachment' => $attachment,
+                    'created_by' => $this->currentUserId(),
+                    'actor_department_id' => $this->currentDepartmentId()
+                ]);
+                $createdSlipIds[] = $slipId;
+                $this->notificationModel->notifyDepartmentManagers([$firstDepartmentId], 'Action slip released', 'A new action slip was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+
                 foreach ($values['receiving_department_ids'] as $departmentId) {
-                    $slipValues = $values;
-                    $slipValues['receiving_department_id'] = (int) $departmentId;
-                    $slipValues = array_merge($slipValues, $this->hiddenCreateValues($slipValues));
-                    $slipId = $this->slipModel->create($slipValues + [
-                        'attachment' => $attachment,
-                        'created_by' => $this->currentUserId(),
-                        'actor_department_id' => $this->currentDepartmentId()
-                    ]);
-                    $createdSlipIds[] = $slipId;
+                    $this->slipModel->routeToDepartment($slipId, (int) $departmentId, $this->currentUserId(), $this->currentDepartmentId(), $values['remarks'], DepartmentActionSlip::STATUS_RELEASED, 'Released to Department');
                     $this->notificationModel->notifyDepartmentManagers([(int) $departmentId], 'Action slip released', 'A new action slip was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
                 }
             }
@@ -327,6 +353,7 @@ class ActionSlips extends Controller
             : null;
 
         $slipId = $this->slipModel->createDraft([
+            'title' => $values['title'],
             'date_received' => $values['date_received'],
             'attachment' => $attachment,
             'created_by' => $this->currentUserId(),
@@ -369,6 +396,22 @@ class ActionSlips extends Controller
         })));
     }
 
+    private function postedUnitManagerIds()
+    {
+        $managerIds = $_POST['unit_manager_ids'] ?? [];
+        if (!is_array($managerIds)) {
+            $managerIds = [$managerIds];
+        }
+
+        if (empty($managerIds) && !empty($_POST['unit_manager_id'])) {
+            $managerIds = [$_POST['unit_manager_id']];
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', $managerIds), function ($managerId) {
+            return $managerId > 0;
+        })));
+    }
+
     private function postedDepartmentIds()
     {
         $departmentIds = $_POST['receiving_department_ids'] ?? [];
@@ -406,6 +449,9 @@ class ActionSlips extends Controller
         $errors = [];
         if ($values['date_received'] === '') {
             $errors['date_received'] = 'Date of Action Slip is required.';
+        }
+        if (trim($values['title'] ?? '') === '') {
+            $errors['title'] = 'Title is required.';
         }
         if (!in_array($values['receiving_level'], ['Department', 'Division', 'Staff'], true)) {
             $errors['receiving_level'] = 'Select a valid release target.';
@@ -498,6 +544,9 @@ class ActionSlips extends Controller
         if ($values['date_received'] === '') {
             $errors['date_received'] = 'Date of Action Slip is required.';
         }
+        if (trim($values['title'] ?? '') === '') {
+            $errors['title'] = 'Title is required.';
+        }
         return $errors;
     }
 
@@ -524,6 +573,7 @@ class ActionSlips extends Controller
 
         return [
             'external_source' => 'Internal Action Slip',
+            'title' => $values['title'],
             'subject' => $values['required_action'],
             'reference_number' => null,
             'remarks' => $values['remarks'],
@@ -548,15 +598,46 @@ class ActionSlips extends Controller
                 throw new NotFoundException('Action slip not found.');
             }
 
+            if (!empty($slip['parent_slip_id'])) {
+                $parentSlipId = (int) $slip['parent_slip_id'];
+                if ($this->slipModel->canUserView($parentSlipId, $this->currentUserId(), $this->currentDepartmentId(), $_SESSION['role'] ?? '')) {
+                    $parentSlip = $this->slipModel->findById($parentSlipId);
+                    if ($parentSlip) {
+                        $slipId = $parentSlipId;
+                        $slip = $parentSlip;
+                    }
+                }
+            }
+
             $currentDepartmentId = (int) ($slip['current_department_id'] ?: $slip['receiving_department_id']);
             $currentDivisionId = (int) ($slip['current_division_id'] ?: 0);
+            $currentUnitId = (int) ($slip['current_unit_id'] ?? 0);
+            $viewerDepartmentId = $this->currentDepartmentId();
+            $viewerDivisionAssignment = $this->slipModel->findDivisionAssignmentForDepartment($slipId, $viewerDepartmentId);
+            $viewDivisionId = ($this->isManager() && $this->isDivision($viewerDepartmentId) && !empty($viewerDivisionAssignment))
+                ? $viewerDepartmentId
+                : $currentDivisionId;
+            $staffDepartmentId = ($this->isManager() && $this->isUnit()) ? $viewerDepartmentId : ($currentUnitId > 0 ? $currentUnitId : ($viewDivisionId > 0 ? $viewDivisionId : $currentDepartmentId));
+            $releasedToLabel = $slip['current_unit_name'] ?: ($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-'));
+            $releasedToSubtext = $slip['assigned_staff_name'] ?? '';
+            if (!empty($viewerDivisionAssignment)) {
+                $viewerDepartment = $this->departmentModel->getDepartmentById($viewerDepartmentId);
+                $releasedToLabel = $viewerDepartment['division_name'] ?? $releasedToLabel;
+                $releasedToSubtext = '';
+            }
 
             $data = [
                 'slip' => $slip,
                 'events' => $this->slipModel->getEvents($slipId),
                 'departments' => $this->departmentModel->getParentDepartments(),
                 'child_divisions' => $this->departmentModel->getChildDepartmentsForParent($currentDepartmentId),
-                'division_staff' => $this->slipModel->getActiveStaffByDepartment($currentDivisionId > 0 ? $currentDivisionId : $currentDepartmentId),
+                'child_units' => $viewDivisionId > 0 ? $this->departmentModel->getUnitsForDivision($viewDivisionId) : [],
+                'unit_managers' => $viewDivisionId > 0 ? $this->slipModel->getActiveManagersByChildUnits($viewDivisionId) : [],
+                'division_staff' => $this->slipModel->getActiveStaffByDepartment($staffDepartmentId),
+                'completed_staff_assignments' => $this->slipModel->getCompletedStaffAssignmentsForDepartment($slipId, $this->currentDepartmentId()),
+                'completed_unit_assignments' => $this->slipModel->getCompletedUnitAssignmentsForDivision($slipId, $this->currentDepartmentId()),
+                'released_to_label' => $releasedToLabel,
+                'released_to_subtext' => $releasedToSubtext,
                 'actions' => $this->allowedActions($slip),
                 'action_options' => DepartmentActionSlip::actionOptions()
             ];
@@ -581,33 +662,91 @@ class ActionSlips extends Controller
         $deptId = $this->currentDepartmentId();
         $currentDepartmentId = (int) ($slip['current_department_id'] ?: $slip['receiving_department_id']);
         $currentDivisionId = (int) ($slip['current_division_id'] ?? 0);
+        $currentUnitId = (int) ($slip['current_unit_id'] ?? 0);
         $assignedStaffId = (int) ($slip['assigned_staff_id'] ?? 0);
+        $staffAssignment = $this->slipModel->findStaffAssignmentForUser((int) $slip['id'], $this->currentUserId());
+        $staffAssignmentStatus = $staffAssignment['status'] ?? '';
+        $departmentAssignment = $this->slipModel->findDepartmentAssignmentForDepartment((int) $slip['id'], $deptId);
+        $departmentAssignmentStatus = $departmentAssignment['status'] ?? '';
+        $divisionAssignment = $this->slipModel->findDivisionAssignmentForDepartment((int) $slip['id'], $deptId);
+        $divisionAssignmentStatus = $divisionAssignment['status'] ?? '';
+        $unitAssignment = $this->slipModel->findUnitAssignmentForDepartment((int) $slip['id'], $deptId);
+        $unitAssignmentStatus = $unitAssignment['status'] ?? '';
         $receivingLevel = $slip['receiving_level'] ?? '';
-        $isDepartmentManager = $this->isManager() && $this->isParentDepartment($deptId) && $currentDepartmentId === $deptId;
-        $isDivisionManager = $this->isManager() && !$this->isParentDepartment($deptId) && $currentDivisionId === $deptId;
-        $isAssignedStaff = $assignedStaffId === $this->currentUserId();
+        $isDepartmentManager = $this->isManager() && $this->isParentDepartment($deptId) && ($currentDepartmentId === $deptId || !empty($departmentAssignment));
+        $isDivisionManager = $this->isManager() && $this->isDivision($deptId) && ($currentDivisionId === $deptId || !empty($divisionAssignment));
+        $isUnitManager = $this->isManager() && $this->isUnit($deptId) && ($currentUnitId === $deptId || !empty($unitAssignment));
+        $isAssignedStaff = $assignedStaffId === $this->currentUserId() || !empty($staffAssignment);
         $isDepartmentLevelSlip = $receivingLevel === 'Department' && $currentDivisionId === 0 && $assignedStaffId === 0;
-        $wasCompletedByStaff = $status === DepartmentActionSlip::STATUS_COMPLETED
-            && $assignedStaffId > 0
-            && (int) ($slip['completed_by'] ?? 0) === $assignedStaffId;
-        $isReturnedToStaff = $status === DepartmentActionSlip::STATUS_RETURNED && $assignedStaffId > 0;
+        $wasCompletedByStaff = $this->slipModel->hasCompletedStaffAssignmentsForDepartment((int) $slip['id'], $deptId);
+        $wasCompletedByUnit = $this->slipModel->hasCompletedUnitAssignmentsForDivision((int) $slip['id'], $deptId);
+        $hasUnresolvedStaffAssignments = $this->slipModel->hasUnresolvedStaffAssignmentsForDepartment((int) $slip['id'], $deptId);
+        $hasActiveStaffAssignments = $this->slipModel->hasActiveStaffAssignmentsForDepartment((int) $slip['id'], $deptId);
+        $isReturnedToStaff = !empty($staffAssignment) && $staffAssignmentStatus === DepartmentActionSlip::STATUS_RETURNED;
+        $canDelegateStaff = $isUnitManager
+            && !$isReturnedToStaff
+            && !$hasActiveStaffAssignments
+            && (
+                (!empty($unitAssignment) && in_array($unitAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($unitAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            );
 
         return [
-            'receive_department' => $isDepartmentManager && $isDepartmentLevelSlip && $status === DepartmentActionSlip::STATUS_RELEASED,
+            'receive_department' => $isDepartmentManager && ($isDepartmentLevelSlip || !empty($departmentAssignment)) && (
+                (!empty($departmentAssignment) && $departmentAssignmentStatus === DepartmentActionSlip::STATUS_RELEASED)
+                || (empty($departmentAssignment) && $status === DepartmentActionSlip::STATUS_RELEASED)
+            ),
             'finalize_draft' => $status === DepartmentActionSlip::STATUS_DRAFT && ($currentDivisionId > 0 ? $isDivisionManager : $isDepartmentManager),
             'cancel_draft' => $status === DepartmentActionSlip::STATUS_DRAFT && ($currentDivisionId > 0 ? $isDivisionManager : $isDepartmentManager),
-            'route_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
-            'delegate_division' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
-            'complete_department' => $isDepartmentManager && $currentDivisionId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RETURNED], true),
+            'route_department' => $isDepartmentManager && ($currentDivisionId === 0 || !empty($departmentAssignment)) && (
+                (!empty($departmentAssignment) && in_array($departmentAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($departmentAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            ),
+            'delegate_division' => $isDepartmentManager && ($currentDivisionId === 0 || !empty($departmentAssignment)) && (
+                (!empty($departmentAssignment) && in_array($departmentAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($departmentAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            ),
+            'complete_department' => $isDepartmentManager && ($currentDivisionId === 0 || !empty($departmentAssignment)) && (
+                (!empty($departmentAssignment) && in_array($departmentAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($departmentAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RETURNED], true))
+            ),
             'close' => false,
-            'receive_division' => $isDivisionManager && $assignedStaffId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
-            'delegate_staff' => $isDivisionManager && !$isReturnedToStaff && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
-            'complete_division' => $isDivisionManager && $assignedStaffId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
-            'confirm_division' => $isDivisionManager && $wasCompletedByStaff,
-            'return_staff_completion' => $isDivisionManager && $wasCompletedByStaff,
-            'start_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true),
-            'complete_staff' => $isAssignedStaff && in_array($status, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true),
-            'return' => $isDivisionManager && $wasCompletedByStaff
+            'receive_division' => $isDivisionManager && (($currentUnitId === 0 && $assignedStaffId === 0) || !empty($divisionAssignment)) && (
+                (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true))
+                || (empty($divisionAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true))
+            ),
+            'delegate_unit' => $isDivisionManager && (($currentUnitId === 0 && $assignedStaffId === 0) || !empty($divisionAssignment)) && (
+                (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($divisionAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            ),
+            'receive_unit' => $isUnitManager && $assignedStaffId === 0 && (
+                (!empty($unitAssignment) && $unitAssignmentStatus === DepartmentActionSlip::STATUS_DELEGATED)
+                || (empty($unitAssignment) && $status === DepartmentActionSlip::STATUS_DELEGATED)
+            ),
+            'delegate_staff' => $canDelegateStaff,
+            'delegate_staff_to_unit_staff' => $canDelegateStaff && $isUnitManager,
+            'complete_unit' => $isUnitManager && $assignedStaffId === 0 && !$hasUnresolvedStaffAssignments && (
+                (!empty($unitAssignment) && in_array($unitAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($unitAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            ),
+            'complete_division' => $isDivisionManager && (($currentUnitId === 0 && $assignedStaffId === 0) || !empty($divisionAssignment)) && (
+                (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($divisionAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            ),
+            'confirm_division' => $isDivisionManager && $currentUnitId === 0 && $wasCompletedByStaff,
+            'confirm_unit' => $isUnitManager && $wasCompletedByStaff,
+            'confirm_unit_for_division' => $isDivisionManager && $wasCompletedByUnit,
+            'return_staff_completion' => (($isDivisionManager && $currentUnitId === 0) || $isUnitManager) && $wasCompletedByStaff,
+            'return_unit_completion' => $isDivisionManager && $wasCompletedByUnit,
+            'start_staff' => $isAssignedStaff && (
+                (!empty($staffAssignment) && in_array($staffAssignmentStatus, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($staffAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true))
+            ),
+            'complete_staff' => $isAssignedStaff && (
+                (!empty($staffAssignment) && in_array($staffAssignmentStatus, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($staffAssignment) && in_array($status, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            ),
+            'return' => (((($isDivisionManager && $currentUnitId === 0) || $isUnitManager) && $wasCompletedByStaff) || ($isDivisionManager && $wasCompletedByUnit))
         ];
     }
 
@@ -619,6 +758,7 @@ class ActionSlips extends Controller
             }
 
             $values = [
+                'title' => trim($_POST['title'] ?? ($slip['title'] ?? '')),
                 'date_received' => trim($_POST['date_received'] ?? ($slip['date_received'] ?? '')),
                 'urgent' => !empty($_POST['urgent']) ? 1 : 0,
                 'receiving_level' => trim($_POST['receiving_level'] ?? 'Department'),
@@ -665,24 +805,8 @@ class ActionSlips extends Controller
                 $this->notificationModel->create($firstStaffId, 'Action slip released', $slip['slip_number'] . ' was released to you.', '/actionSlips/show/' . $slipId);
 
                 foreach ($values['assigned_staff_ids'] as $staffId) {
-                    $duplicateValues = $values;
-                    $duplicateValues['assigned_staff_id'] = (int) $staffId;
-                    $duplicateValues['assigned_staff_ids'] = [(int) $staffId];
-                    $duplicateValues['target_staff_department_id'] = $this->findStaffDepartmentInCurrentScope((int) $staffId);
-                    $duplicateValues = array_merge($duplicateValues, $this->hiddenCreateValues($duplicateValues));
-                    $newSlipId = $this->slipModel->createDraft([
-                        'date_received' => $slip['date_received'] ?? $values['date_received'],
-                        'attachment' => $slip['attachment'] ?? null,
-                        'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
-                        'actor_department_id' => $this->currentDepartmentId(),
-                        'receiving_department_id' => (int) $duplicateValues['receiving_department_id'],
-                        'receiving_division_id' => $duplicateValues['receiving_division_id']
-                    ]);
-                    $this->slipModel->releaseDraft($newSlipId, $duplicateValues + [
-                        'actor_user_id' => $this->currentUserId(),
-                        'actor_department_id' => $this->currentDepartmentId()
-                    ]);
-                    $this->notificationModel->create((int) $staffId, 'Action slip released', 'A new action slip was released to you.', '/actionSlips/show/' . $newSlipId);
+                    $this->slipModel->delegateToStaff($slipId, (int) $staffId, $this->currentUserId(), $this->currentDepartmentId(), $values['remarks']);
+                    $this->notificationModel->create((int) $staffId, 'Action slip released', $slip['slip_number'] . ' was released to you.', '/actionSlips/show/' . $slipId);
                 }
 
                 flash('success', 'Draft action slip finalized and released to selected staff.', 'success');
@@ -703,16 +827,8 @@ class ActionSlips extends Controller
                 $this->notificationModel->notifyDepartmentManagers([$firstDepartmentId], 'Action slip released', $slip['slip_number'] . ' was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
 
                 foreach ($values['receiving_department_ids'] as $departmentId) {
-                    $duplicateValues = $values;
-                    $duplicateValues['receiving_department_id'] = (int) $departmentId;
-                    $duplicateValues['receiving_department_ids'] = [(int) $departmentId];
-                    $duplicateValues = array_merge($duplicateValues, $this->hiddenCreateValues($duplicateValues));
-                    $newSlipId = $this->slipModel->create($duplicateValues + [
-                        'attachment' => $slip['attachment'] ?? null,
-                        'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
-                        'actor_department_id' => $this->currentDepartmentId()
-                    ]);
-                    $this->notificationModel->notifyDepartmentManagers([(int) $departmentId], 'Action slip released', $slip['slip_number'] . ' was released to your department.', '/actionSlips/show/' . $newSlipId, $this->currentUserId());
+                    $this->slipModel->routeToDepartment($slipId, (int) $departmentId, $this->currentUserId(), $this->currentDepartmentId(), $values['remarks'], DepartmentActionSlip::STATUS_RELEASED, 'Released to Department');
+                    $this->notificationModel->notifyDepartmentManagers([(int) $departmentId], 'Action slip released', $slip['slip_number'] . ' was released to your department.', '/actionSlips/show/' . $slipId, $this->currentUserId());
                 }
 
                 flash('success', 'Draft action slip finalized and released to selected departments.', 'success');
@@ -733,16 +849,8 @@ class ActionSlips extends Controller
                 $this->notificationModel->notifyDepartmentManagers([$firstDivisionId], 'Action slip released', $slip['slip_number'] . ' was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
 
                 foreach ($values['receiving_division_ids'] as $divisionId) {
-                    $duplicateValues = $values;
-                    $duplicateValues['receiving_division_id'] = (int) $divisionId;
-                    $duplicateValues['receiving_division_ids'] = [(int) $divisionId];
-                    $duplicateValues = array_merge($duplicateValues, $this->hiddenCreateValues($duplicateValues));
-                    $newSlipId = $this->slipModel->create($duplicateValues + [
-                        'attachment' => $slip['attachment'] ?? null,
-                        'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
-                        'actor_department_id' => $this->currentDepartmentId()
-                    ]);
-                    $this->notificationModel->notifyDepartmentManagers([(int) $divisionId], 'Action slip released', $slip['slip_number'] . ' was released to your division.', '/actionSlips/show/' . $newSlipId, $this->currentUserId());
+                    $this->slipModel->delegateToDivision($slipId, (int) $divisionId, $this->currentUserId(), $this->currentDepartmentId(), $values['remarks'], DepartmentActionSlip::STATUS_RELEASED, 'Released to Division');
+                    $this->notificationModel->notifyDepartmentManagers([(int) $divisionId], 'Action slip released', $slip['slip_number'] . ' was released to your division.', '/actionSlips/show/' . $slipId, $this->currentUserId());
                 }
 
                 flash('success', 'Draft action slip finalized and released to selected divisions.', 'success');
@@ -834,6 +942,46 @@ class ActionSlips extends Controller
         });
     }
 
+    public function delegateUnit($id)
+    {
+        $this->handleAction($id, function ($slipId, $slip) {
+            if (!$this->allowedActions($slip)['delegate_unit']) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $managerIds = $this->postedUnitManagerIds();
+            if (empty($managerIds)) {
+                throw new ValidationException('Select at least one active unit manager under the current division.');
+            }
+
+            foreach ($managerIds as $managerId) {
+                if (!$this->slipModel->findActiveManagerInChildUnit($managerId, $this->currentDepartmentId())) {
+                    throw new ValidationException('Select active unit managers under the current division.');
+                }
+            }
+
+            $remarks = trim($_POST['remarks'] ?? '');
+            foreach ($managerIds as $managerId) {
+                $manager = $this->slipModel->findActiveManagerInChildUnit((int) $managerId, $this->currentDepartmentId());
+                $this->slipModel->delegateToUnit($slipId, (int) $manager['department_id'], (int) $managerId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
+                $this->notificationModel->create((int) $managerId, 'Action slip assigned to unit', $slip['slip_number'] . ' was assigned to your unit.', '/actionSlips/show/' . $slipId);
+            }
+
+            flash('success', 'Action slip delegated to selected unit managers.', 'success');
+        });
+    }
+
+    public function receiveUnit($id)
+    {
+        $this->handleAction($id, function ($slipId, $slip) {
+            if (!$this->allowedActions($slip)['receive_unit']) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+            $this->slipModel->receiveByUnit($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
+            flash('success', 'Action slip received by unit.', 'success');
+        });
+    }
+
     public function delegateStaff($id)
     {
         $this->handleAction($id, function ($slipId, $slip) {
@@ -843,42 +991,19 @@ class ActionSlips extends Controller
 
             $staffIds = $this->postedDelegateStaffIds();
             if (empty($staffIds)) {
-                throw new ValidationException('Select at least one active staff member from the current division.');
+                throw new ValidationException('Select at least one active staff member from your current office.');
             }
 
             foreach ($staffIds as $staffId) {
                 if (!$this->slipModel->findActiveUserInDepartment($staffId, $this->currentDepartmentId(), 'staff')) {
-                    throw new ValidationException('Select active staff members from the current division.');
+                    throw new ValidationException('Select active staff members from your current office.');
                 }
             }
 
             $remarks = trim($_POST['remarks'] ?? '');
-            $firstStaffId = (int) array_shift($staffIds);
-            $this->slipModel->delegateToStaff($slipId, $firstStaffId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
-            $this->notificationModel->create($firstStaffId, 'Action slip assigned', $slip['slip_number'] . ' was assigned to you.', '/actionSlips/show/' . $slipId);
-
             foreach ($staffIds as $staffId) {
-                $duplicateSlipId = $this->slipModel->create([
-                    'external_source' => $slip['external_source'] ?? 'Internal Action Slip',
-                    'date_received' => $slip['date_received'],
-                    'subject' => $slip['subject'] ?? ($slip['required_action'] ?? 'Action slip'),
-                    'reference_number' => $slip['reference_number'] ?? null,
-                    'receiving_level' => 'Staff',
-                    'urgent' => !empty($slip['urgent']) ? 1 : 0,
-                    'attachment' => $slip['attachment'] ?? null,
-                    'required_action' => $slip['required_action'],
-                    'deadline' => $slip['deadline'] ?? null,
-                    'receiving_department_id' => (int) ($slip['current_department_id'] ?: $slip['receiving_department_id']),
-                    'receiving_division_id' => $this->currentDepartmentId(),
-                    'assigned_staff_id' => (int) $staffId,
-                    'remarks' => $remarks,
-                    'created_by' => (int) ($slip['created_by'] ?? $this->currentUserId()),
-                    'actor_department_id' => $this->currentDepartmentId(),
-                    'release_action' => 'Released to Staff'
-                ]);
-
-                $this->slipModel->delegateToStaff($duplicateSlipId, (int) $staffId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
-                $this->notificationModel->create((int) $staffId, 'Action slip assigned', 'A new action slip was assigned to you.', '/actionSlips/show/' . $duplicateSlipId);
+                $this->slipModel->delegateToStaff($slipId, (int) $staffId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
+                $this->notificationModel->create((int) $staffId, 'Action slip assigned', $slip['slip_number'] . ' was assigned to you.', '/actionSlips/show/' . $slipId);
             }
 
             flash('success', 'Action slip delegated to selected staff.', 'success');
@@ -923,25 +1048,57 @@ class ActionSlips extends Controller
                 throw new AuthorizationException('Unauthorized action.');
             }
 
-            $wasReturned = ($slip['status'] ?? '') === DepartmentActionSlip::STATUS_RETURNED;
+            $staffAssignment = $this->slipModel->findStaffAssignmentForUser($slipId, $this->currentUserId());
+            $wasReturned = ($staffAssignment['status'] ?? '') === DepartmentActionSlip::STATUS_RETURNED
+                || (($slip['status'] ?? '') === DepartmentActionSlip::STATUS_RETURNED && (int) ($slip['assigned_staff_id'] ?? 0) === $this->currentUserId());
             $attachment = $this->handleUpload('completion_attachment', 'action_slips/completions');
             $this->slipModel->completeByStaff($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), $attachment);
             $title = $wasReturned ? 'Action slip resubmitted by staff' : 'Action slip completed by staff';
             $message = $wasReturned ? $slip['slip_number'] . ' was resubmitted by staff.' : $slip['slip_number'] . ' was marked completed by staff.';
             $this->notificationModel->notifyDepartmentManagers([$this->currentDepartmentId()], $title, $message, '/actionSlips/show/' . $slipId, $this->currentUserId());
-            flash('success', $wasReturned ? 'Action slip resubmitted to the division manager.' : 'Action slip marked completed by staff.', 'success');
+            flash('success', $wasReturned ? 'Action slip resubmitted to your manager.' : 'Action slip marked completed by staff.', 'success');
         });
     }
 
     public function confirmDivision($id)
     {
         $this->handleAction($id, function ($slipId, $slip) {
-            if (!$this->allowedActions($slip)['confirm_division']) {
+            $actions = $this->allowedActions($slip);
+            if (empty($actions['confirm_division']) && empty($actions['confirm_unit_for_division'])) {
                 throw new AuthorizationException('Unauthorized action.');
             }
-            $this->slipModel->confirmByDivisionManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
+            if (!empty($actions['confirm_unit_for_division']) && empty($_POST['assignment_id'])) {
+                throw new ValidationException('Select a completed unit assignment to confirm.');
+            }
+            $this->slipModel->confirmByDivisionManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), (int) ($_POST['assignment_id'] ?? 0));
             $this->notificationModel->notifyDepartmentManagers([(int) ($slip['current_department_id'] ?: $slip['receiving_department_id'])], 'Action slip confirmed', $slip['slip_number'] . ' was confirmed by the division manager.', '/actionSlips/show/' . $slipId, $this->currentUserId());
             flash('success', 'Completion confirmed by division manager.', 'success');
+        });
+    }
+
+    public function confirmUnit($id)
+    {
+        $this->handleAction($id, function ($slipId, $slip) {
+            if (!$this->allowedActions($slip)['confirm_unit']) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+            $this->slipModel->confirmByUnitManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), (int) ($_POST['assignment_id'] ?? 0));
+            flash('success', 'Staff completion confirmed. You may now mark the unit task completed.');
+        });
+    }
+
+    public function completeUnit($id)
+    {
+        $this->handleAction($id, function ($slipId, $slip) {
+            if (!$this->allowedActions($slip)['complete_unit']) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+            $this->slipModel->completeByUnitManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
+            $divisionId = (int) ($slip['current_division_id'] ?: 0);
+            if ($divisionId > 0) {
+                $this->notificationModel->notifyDepartmentManagers([$divisionId], 'Action slip completed by unit', $slip['slip_number'] . ' was marked completed by the unit manager.', '/actionSlips/show/' . $slipId, $this->currentUserId());
+            }
+            flash('success', 'Action slip marked completed by unit manager.');
         });
     }
 
@@ -986,9 +1143,20 @@ class ActionSlips extends Controller
                     throw new ValidationException('Select a valid return reason.');
                 }
                 $remarks = 'Reason: ' . $reason . "\n" . $remarks;
-                $staffId = $this->slipModel->returnStaffCompletion($slipId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
+                $staffId = $this->slipModel->returnStaffCompletion($slipId, $this->currentUserId(), $this->currentDepartmentId(), $remarks, (int) ($_POST['assignment_id'] ?? 0));
                 if ($staffId > 0) {
                     $this->notificationModel->create($staffId, 'Action slip returned', $slip['slip_number'] . ' was returned for revision.', '/actionSlips/show/' . $slipId);
+                }
+            } elseif (!empty($actions['return_unit_completion'])) {
+                $reason = trim($_POST['return_reason'] ?? '');
+                $allowedReasons = ['Did not pass standards', 'Change of instruction', 'Other'];
+                if (!in_array($reason, $allowedReasons, true)) {
+                    throw new ValidationException('Select a valid return reason.');
+                }
+                $remarks = 'Reason: ' . $reason . "\n" . $remarks;
+                $unitId = $this->slipModel->returnUnitCompletion($slipId, $this->currentUserId(), $this->currentDepartmentId(), $remarks, (int) ($_POST['assignment_id'] ?? 0));
+                if ($unitId > 0) {
+                    $this->notificationModel->notifyDepartmentManagers([$unitId], 'Action slip returned to unit', $slip['slip_number'] . ' was returned for revision.', '/actionSlips/show/' . $slipId, $this->currentUserId());
                 }
             } else {
                 $returnTargetDepartmentId = $this->slipModel->returnSlip($slipId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);

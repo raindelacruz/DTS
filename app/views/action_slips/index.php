@@ -70,7 +70,7 @@ $statusClasses = [
     <form method="GET" class="das-filter-form">
         <div>
             <label class="form-label fw-semibold">Keyword</label>
-            <input type="text" name="keyword" class="form-control" placeholder="Tracking no. or instruction" value="<?php echo htmlspecialchars($filters['keyword'] ?? ''); ?>">
+            <input type="text" name="keyword" class="form-control" placeholder="Title, tracking no., or instruction" value="<?php echo htmlspecialchars($filters['keyword'] ?? ''); ?>">
         </div>
         <div>
             <label class="form-label fw-semibold">Status</label>
@@ -124,12 +124,15 @@ $statusClasses = [
                         <?php $status = $slip['status'] ?? ''; $statusClass = $statusClasses[$status] ?? 'bg-light text-dark border'; ?>
                         <tr>
                             <td>
-                                <div class="das-title"><?php echo htmlspecialchars($slip['slip_number']); ?></div>
-                                <div class="das-meta"><?php echo !empty($slip['urgent']) ? 'Urgent - ' : ''; ?><?php echo htmlspecialchars(date('M d, Y', strtotime($slip['date_received']))); ?></div>
+                                <div class="das-title"><?php echo htmlspecialchars($slip['title'] ?: $slip['slip_number']); ?></div>
+                                <div class="das-meta"><?php echo htmlspecialchars($slip['slip_number']); ?> - <?php echo !empty($slip['urgent']) ? 'Urgent - ' : ''; ?><?php echo htmlspecialchars(date('M d, Y', strtotime($slip['date_received']))); ?></div>
+                                <?php if (!empty($slip['parent_slip_id']) && !empty($slip['parent_slip_number'])): ?>
+                                    <div class="das-meta">Child assignment of <a href="<?php echo URLROOT; ?>/actionSlips/show/<?php echo (int) $slip['parent_slip_id']; ?>"><?php echo htmlspecialchars($slip['parent_slip_number']); ?></a></div>
+                                <?php endif; ?>
                             </td>
                             <td><?php echo htmlspecialchars($slip['required_action']); ?></td>
                             <td><span class="status-pill <?php echo $statusClass; ?>"><?php echo htmlspecialchars($status); ?></span></td>
-                            <td><?php echo htmlspecialchars($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-')); ?></td>
+                            <td><?php echo htmlspecialchars($slip['current_unit_name'] ?: ($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-'))); ?></td>
                             <td><?php echo htmlspecialchars($slip['assigned_staff_name'] ?: '-'); ?></td>
                             <td><?php echo !empty($slip['deadline']) ? htmlspecialchars(date('M d, Y', strtotime($slip['deadline']))) : '<span class="text-muted">-</span>'; ?></td>
                             <td class="text-end"><a href="<?php echo URLROOT; ?>/actionSlips/show/<?php echo (int) $slip['id']; ?>" class="btn btn-sm btn-outline-primary">View</a></td>

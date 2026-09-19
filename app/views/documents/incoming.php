@@ -15,11 +15,6 @@ $filters = $data['filters'] ?? [];
     <div><h1 class="section-title"><?php echo htmlspecialchars($data['title']); ?></h1></div>
 </div>
 
-<div class="instruction-card">
-    <h3>Quick Guide</h3>
-    <p>This screen shows documents routed into your department. Filter the list when needed, then open a record to receive it or complete the next manager action shown on the details page.</p>
-</div>
-
 <div class="app-card list-filter-card p-4 mb-4">
     <form method="GET" class="row g-3 align-items-end">
         <div class="col-lg-3 col-md-6">

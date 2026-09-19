@@ -43,6 +43,8 @@ CREATE TABLE `custodians` (
 CREATE TABLE `departments` (
   `id` int(11) NOT NULL,
   `parent_id` int(11) DEFAULT NULL,
+  `office_level` varchar(20) NOT NULL DEFAULT 'department',
+  `can_release` tinyint(1) NOT NULL DEFAULT 1,
   `department_name` varchar(150) NOT NULL,
   `division_name` varchar(150) NOT NULL,
   `code` varchar(50) NOT NULL,
@@ -140,6 +142,10 @@ INSERT INTO `departments` (`id`, `parent_id`, `department_name`, `division_name`
 (83, NULL, 'NFA Agusan del Sur', 'NFA Agusan del Sur', 'ADS', 'agusandelsur@nfa.gov.ph', '2026-07-01 05:45:30'),
 (84, NULL, 'NFA Surigao del Sur Branch', 'NFA Surigao del Sur Branch', 'SDS', 'surigaodelsur@nfa.gov.ph', '2026-07-01 05:46:10');
 
+UPDATE `departments` SET `office_level` = 'department', `can_release` = 1 WHERE `parent_id` IS NULL;
+UPDATE `departments` SET `office_level` = 'division', `can_release` = 1 WHERE `parent_id` IS NOT NULL;
+UPDATE `departments` SET `can_release` = 0 WHERE `office_level` = 'unit';
+
 -- --------------------------------------------------------
 
 --
@@ -162,6 +168,7 @@ CREATE TABLE `department_action_slips` (
   `receiving_division_id` int(11) DEFAULT NULL,
   `current_department_id` int(11) DEFAULT NULL,
   `current_division_id` int(11) DEFAULT NULL,
+  `current_unit_id` int(11) DEFAULT NULL,
   `assigned_staff_id` int(11) DEFAULT NULL,
   `remarks` text DEFAULT NULL,
   `created_by` int(11) NOT NULL,
@@ -2648,11 +2655,12 @@ INSERT INTO `documents` (`id`, `prefix`, `sequence_number`, `title`, `particular
 CREATE TABLE `document_assignments` (
   `id` int(11) NOT NULL,
   `document_id` int(11) NOT NULL,
+  `parent_assignment_id` int(11) DEFAULT NULL,
   `assigned_by_user_id` int(11) NOT NULL,
   `assigned_by_department_id` int(11) NOT NULL,
   `assigned_to_user_id` int(11) NOT NULL,
   `assigned_to_department_id` int(11) NOT NULL,
-  `assignment_type` enum('INTERNAL') NOT NULL DEFAULT 'INTERNAL',
+  `assignment_type` enum('INTERNAL','UNIT') NOT NULL DEFAULT 'INTERNAL',
   `instructions` text DEFAULT NULL,
   `status` enum('Pending','Received','Completed','Confirmed','Returned','Cancelled') NOT NULL DEFAULT 'Pending',
   `assigned_at` datetime NOT NULL DEFAULT current_timestamp(),
@@ -6346,7 +6354,8 @@ ALTER TABLE `custodians`
 ALTER TABLE `departments`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `code` (`code`),
-  ADD KEY `fk_parent_department` (`parent_id`);
+  ADD KEY `fk_parent_department` (`parent_id`),
+  ADD KEY `idx_departments_office_level` (`office_level`);
 
 --
 -- Indexes for table `department_action_slips`
@@ -6356,6 +6365,7 @@ ALTER TABLE `department_action_slips`
   ADD UNIQUE KEY `uq_department_action_slips_number` (`slip_number`),
   ADD KEY `idx_das_receiving_department` (`receiving_department_id`),
   ADD KEY `idx_das_current_division` (`current_division_id`),
+  ADD KEY `idx_das_current_unit` (`current_unit_id`),
   ADD KEY `idx_das_assigned_staff` (`assigned_staff_id`),
   ADD KEY `idx_das_status` (`status`),
   ADD KEY `idx_das_date_received` (`date_received`),
@@ -6407,6 +6417,7 @@ ALTER TABLE `documents`
 ALTER TABLE `document_assignments`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_document_assignments_document` (`document_id`),
+  ADD KEY `idx_document_assignments_parent` (`parent_assignment_id`),
   ADD KEY `idx_document_assignments_assignee` (`assigned_to_user_id`),
   ADD KEY `idx_document_assignments_department` (`assigned_to_department_id`),
   ADD KEY `idx_document_assignments_status` (`status`),
@@ -6653,6 +6664,7 @@ ALTER TABLE `department_action_slips`
   ADD CONSTRAINT `fk_das_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`),
   ADD CONSTRAINT `fk_das_current_department` FOREIGN KEY (`current_department_id`) REFERENCES `departments` (`id`),
   ADD CONSTRAINT `fk_das_current_division` FOREIGN KEY (`current_division_id`) REFERENCES `departments` (`id`),
+  ADD CONSTRAINT `fk_das_current_unit` FOREIGN KEY (`current_unit_id`) REFERENCES `departments` (`id`),
   ADD CONSTRAINT `fk_das_receiving_department` FOREIGN KEY (`receiving_department_id`) REFERENCES `departments` (`id`),
   ADD CONSTRAINT `fk_das_receiving_division` FOREIGN KEY (`receiving_division_id`) REFERENCES `departments` (`id`);
 

@@ -6,6 +6,29 @@ class User {
 
     public function __construct() {
         $this->db = new Database;
+        $this->ensureAccessHistorySchema();
+    }
+
+    private function ensureAccessHistorySchema()
+    {
+        $this->db->query("
+            CREATE TABLE IF NOT EXISTS user_access_change_history (
+                id INT(11) NOT NULL AUTO_INCREMENT,
+                user_id INT(11) NOT NULL,
+                changed_by_user_id INT(11) NOT NULL,
+                old_role VARCHAR(40) DEFAULT NULL,
+                new_role VARCHAR(40) DEFAULT NULL,
+                old_department_id INT(11) DEFAULT NULL,
+                new_department_id INT(11) DEFAULT NULL,
+                reason TEXT DEFAULT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                KEY idx_access_history_user (user_id),
+                KEY idx_access_history_changed_by (changed_by_user_id),
+                KEY idx_access_history_created_at (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->db->execute();
     }
 
     public static function roles()
@@ -214,6 +237,22 @@ class User {
         return $this->db->execute();
     }
 
+    public function updateRoleWithHistory($id, $role, $changedByUserId, $oldRole, $departmentId, $reason = '')
+    {
+        try {
+            $this->db->beginTransaction();
+            $this->updateRole($id, $role);
+            $this->recordAccessChange($id, $changedByUserId, $oldRole, $role, $departmentId, $departmentId, $reason);
+            $this->db->commit();
+            return true;
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     public function updateDepartment($id, $departmentId)
     {
         $this->db->query("
@@ -225,6 +264,76 @@ class User {
         $this->db->bind(':id', $id);
 
         return $this->db->execute();
+    }
+
+    public function updateDepartmentWithHistory($id, $departmentId, $changedByUserId, $role, $oldDepartmentId, $reason = '')
+    {
+        try {
+            $this->db->beginTransaction();
+            $this->updateDepartment($id, $departmentId);
+            $this->recordAccessChange($id, $changedByUserId, $role, $role, $oldDepartmentId, $departmentId, $reason);
+            $this->db->commit();
+            return true;
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function recordAccessChange($userId, $changedByUserId, $oldRole, $newRole, $oldDepartmentId, $newDepartmentId, $reason = '')
+    {
+        $this->db->query("
+            INSERT INTO user_access_change_history (
+                user_id,
+                changed_by_user_id,
+                old_role,
+                new_role,
+                old_department_id,
+                new_department_id,
+                reason
+            ) VALUES (
+                :user_id,
+                :changed_by_user_id,
+                :old_role,
+                :new_role,
+                :old_department_id,
+                :new_department_id,
+                :reason
+            )
+        ");
+
+        $this->db->bind(':user_id', (int) $userId);
+        $this->db->bind(':changed_by_user_id', (int) $changedByUserId);
+        $this->db->bind(':old_role', $oldRole !== null ? (string) $oldRole : null);
+        $this->db->bind(':new_role', $newRole !== null ? (string) $newRole : null);
+        $this->db->bind(':old_department_id', !empty($oldDepartmentId) ? (int) $oldDepartmentId : null);
+        $this->db->bind(':new_department_id', !empty($newDepartmentId) ? (int) $newDepartmentId : null);
+        $this->db->bind(':reason', trim((string) $reason) !== '' ? trim((string) $reason) : null);
+
+        return $this->db->execute();
+    }
+
+    public function getAccessChangeHistory($userId, $limit = 10)
+    {
+        $limit = max(1, min(50, (int) $limit));
+        $this->db->query("
+            SELECT
+                h.*,
+                old_dept.division_name AS old_department_name,
+                new_dept.division_name AS new_department_name,
+                CONCAT(changer.firstname, ' ', changer.lastname) AS changed_by_name
+            FROM user_access_change_history h
+            LEFT JOIN departments old_dept ON old_dept.id = h.old_department_id
+            LEFT JOIN departments new_dept ON new_dept.id = h.new_department_id
+            LEFT JOIN users changer ON changer.id = h.changed_by_user_id
+            WHERE h.user_id = :user_id
+            ORDER BY h.created_at DESC, h.id DESC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':user_id', (int) $userId);
+        return $this->db->resultSet();
     }
 
     public function updatePassword($id, $password)

@@ -70,7 +70,7 @@
                         $selectedDepartmentName = '';
                         foreach (($data['departments'] ?? []) as $department) {
                             if ((string) $department['id'] === $selectedDepartmentId) {
-                                $selectedDepartmentName = $department['division_name'];
+                                $selectedDepartmentName = $department['division_name'] . ' (' . ucfirst((string) ($department['office_level'] ?? 'department')) . ')';
                                 break;
                             }
                         }
@@ -89,7 +89,8 @@
                     >
                     <datalist id="department_options">
                         <?php foreach (($data['departments'] ?? []) as $department): ?>
-                            <option data-id="<?php echo (int) $department['id']; ?>" value="<?php echo htmlspecialchars($department['division_name']); ?>"></option>
+                            <?php $officeLabel = $department['division_name'] . ' (' . ucfirst((string) ($department['office_level'] ?? 'department')) . ')'; ?>
+                            <option data-id="<?php echo (int) $department['id']; ?>" value="<?php echo htmlspecialchars($officeLabel); ?>"></option>
                         <?php endforeach; ?>
                     </datalist>
                     <?php if (!empty($data['errors']['department_id'])): ?><div class="field-error"><?php echo htmlspecialchars($data['errors']['department_id']); ?></div><?php endif; ?>

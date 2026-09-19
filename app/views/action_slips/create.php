@@ -83,6 +83,11 @@ if (empty($selectedStaffIds) && !empty($values['assigned_staff_id'])) {
             <label class="form-label fw-semibold">Tracking Number</label>
             <input type="text" class="form-control" value="<?php echo htmlspecialchars($data['next_slip_number'] ?? ''); ?>" readonly>
         </div>
+        <div class="col-lg-6">
+            <label for="title" class="form-label fw-semibold">Title</label>
+            <input type="text" id="title" name="title" class="form-control <?php echo isset($errors['title']) ? 'is-invalid' : ''; ?>" value="<?php echo htmlspecialchars($values['title'] ?? ''); ?>" maxlength="255" required>
+            <?php if (isset($errors['title'])): ?><div class="invalid-feedback"><?php echo htmlspecialchars($errors['title']); ?></div><?php endif; ?>
+        </div>
         <div class="col-lg-3 col-md-6">
             <label for="date_received" class="form-label fw-semibold">Date of Action Slip</label>
             <input type="date" id="date_received" name="date_received" class="form-control <?php echo isset($errors['date_received']) ? 'is-invalid' : ''; ?>" value="<?php echo htmlspecialchars($values['date_received'] ?? date('Y-m-d')); ?>" required>

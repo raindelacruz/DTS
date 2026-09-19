@@ -28,11 +28,6 @@ $statusStyle = ($user->status ?? '') === 'active'
 </div>
 <?php endif; ?>
 
-<div class="instruction-card">
-    <h3>System Admin View</h3>
-    <p>Review the user's <strong>name</strong> and <strong>email address</strong>, then update password, role, status, or department when needed.</p>
-</div>
-
 <?php if (!empty($data['success'])): ?><div class="alert alert-success app-card border-0 mb-4"><?php echo htmlspecialchars($data['success']); ?></div><?php endif; ?>
 <?php if (!empty($data['error'])): ?><div class="alert alert-danger app-card border-0 mb-4"><?php echo htmlspecialchars($data['error']); ?></div><?php endif; ?>
 
@@ -86,7 +81,7 @@ $statusStyle = ($user->status ?? '') === 'active'
             <div class="col-md-6">
                 <div class="app-card p-4 h-100">
                     <div class="text-muted small text-uppercase fw-semibold mb-3">Change Role</div>
-                    <form action="<?php echo URLROOT; ?>/users/updateRole/<?php echo (int) $user->id; ?>" method="POST">
+                    <form action="<?php echo URLROOT; ?>/users/updateRole/<?php echo (int) $user->id; ?>" method="POST" onsubmit="return confirm('Change role for <?php echo htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8'); ?>? Personal history remains attached to the user; manager access follows the selected role and office.');">
                         <?php echo csrfInput(); ?>
                         <label class="form-label fw-semibold">Role</label>
                         <select name="role" class="form-select" required>
@@ -96,6 +91,8 @@ $statusStyle = ($user->status ?? '') === 'active'
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <label class="form-label fw-semibold mt-3">Reason</label>
+                        <textarea name="reason" class="form-control" rows="2" placeholder="Optional audit note"></textarea>
                         <button type="submit" class="btn btn-outline-primary mt-3">Save Role</button>
                     </form>
                 </div>
@@ -119,23 +116,58 @@ $statusStyle = ($user->status ?? '') === 'active'
             <div class="col-12">
                 <div class="app-card p-4">
                     <div class="text-muted small text-uppercase fw-semibold mb-3">Change Department</div>
-                    <form action="<?php echo URLROOT; ?>/users/updateDepartment/<?php echo (int) $user->id; ?>" method="POST">
+                    <form action="<?php echo URLROOT; ?>/users/updateDepartment/<?php echo (int) $user->id; ?>" method="POST" onsubmit="return confirm('Change office for <?php echo htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8'); ?>? Personal history remains attached to the user; manager access follows the selected role and office.');">
                         <?php echo csrfInput(); ?>
                         <label class="form-label fw-semibold">Department</label>
                         <select name="department_id" class="form-select" required>
                             <option value="">Select department</option>
                             <?php foreach (($data['departments'] ?? []) as $department): ?>
+                                <?php $officeLevel = ucfirst((string) ($department['office_level'] ?? 'department')); ?>
                                 <option value="<?php echo (int) $department['id']; ?>" <?php echo (int) ($user->department_id ?? 0) === (int) $department['id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($department['division_name']); ?>
+                                    <?php echo htmlspecialchars($department['division_name'] . ' (' . $officeLevel . ')'); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <label class="form-label fw-semibold mt-3">Reason</label>
+                        <textarea name="reason" class="form-control" rows="2" placeholder="Optional audit note"></textarea>
                         <button type="submit" class="btn btn-outline-primary mt-3">Save Department</button>
                     </form>
                 </div>
             </div>
         </div>
     </div>
+</div>
+
+<div class="app-card p-4 mt-4">
+    <div class="text-muted small text-uppercase fw-semibold mb-3">Role and Office Change History</div>
+    <?php if (empty($data['access_history'])): ?>
+        <div class="text-muted">No role or office changes recorded yet.</div>
+    <?php else: ?>
+        <div class="table-responsive">
+            <table class="table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Role</th>
+                        <th>Office</th>
+                        <th>Changed By</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($data['access_history'] as $history): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars($history->created_at ?? ''); ?></td>
+                            <td><?php echo htmlspecialchars(($data['roles'][$history->old_role] ?? ucfirst((string) $history->old_role)) . ' to ' . ($data['roles'][$history->new_role] ?? ucfirst((string) $history->new_role))); ?></td>
+                            <td><?php echo htmlspecialchars(($history->old_department_name ?? 'Unassigned') . ' to ' . ($history->new_department_name ?? 'Unassigned')); ?></td>
+                            <td><?php echo htmlspecialchars($history->changed_by_name ?? 'System'); ?></td>
+                            <td><?php echo htmlspecialchars($history->reason ?? ''); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
 </div>
 
 <?php require_once APPROOT . '/views/layout/footer.php'; ?>

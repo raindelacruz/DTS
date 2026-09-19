@@ -140,6 +140,7 @@ return static function (PDO $pdo): void {
         CREATE TABLE IF NOT EXISTS department_action_slips (
             id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
             slip_number VARCHAR(100) NOT NULL,
+            title VARCHAR(255) DEFAULT NULL,
             external_source VARCHAR(255) NOT NULL,
             date_received DATE NOT NULL,
             subject VARCHAR(255) NOT NULL,
@@ -215,6 +216,8 @@ return static function (PDO $pdo): void {
     $addColumn('document_assignments', 'return_remarks', 'TEXT DEFAULT NULL AFTER `returned_at`');
 
     $addColumn('department_action_slips', 'receiving_level', "VARCHAR(20) NOT NULL DEFAULT 'Department' AFTER `reference_number`");
+    $addColumn('department_action_slips', 'title', 'VARCHAR(255) DEFAULT NULL AFTER `slip_number`');
+    $pdo->exec("UPDATE department_action_slips SET title = slip_number WHERE title IS NULL OR TRIM(title) = ''");
     $addColumn('department_action_slips', 'urgent', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER `receiving_level`');
     $addColumn('department_action_slips', 'receiving_division_id', 'INT(11) DEFAULT NULL AFTER `receiving_department_id`');
     $addColumn('department_action_slips', 'current_department_id', 'INT(11) DEFAULT NULL AFTER `receiving_division_id`');

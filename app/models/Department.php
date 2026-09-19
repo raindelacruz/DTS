@@ -12,11 +12,108 @@ class Department
             DB_PASS,
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
         );
+
+        $this->ensureSchema();
+    }
+
+    private function ensureSchema()
+    {
+        if (!$this->columnExists('departments', 'office_level')) {
+            $this->db->exec("
+                ALTER TABLE departments
+                ADD COLUMN office_level VARCHAR(20) NOT NULL DEFAULT 'department'
+                AFTER parent_id
+            ");
+        }
+
+        if (!$this->columnExists('departments', 'can_release')) {
+            $this->db->exec("
+                ALTER TABLE departments
+                ADD COLUMN can_release TINYINT(1) NOT NULL DEFAULT 1
+                AFTER office_level
+            ");
+        }
+
+        $this->db->exec("
+            UPDATE departments
+            SET office_level = 'department', can_release = 1
+            WHERE parent_id IS NULL
+            AND (office_level IS NULL OR office_level = '' OR office_level = 'department')
+        ");
+
+        $this->db->exec("
+            UPDATE departments
+            SET office_level = 'division', can_release = 1
+            WHERE parent_id IS NOT NULL
+            AND (office_level IS NULL OR office_level = '' OR office_level = 'department')
+        ");
+
+        $this->db->exec("
+            UPDATE departments
+            SET can_release = 0
+            WHERE office_level = 'unit'
+        ");
+
+        if (!$this->indexExists('departments', 'idx_departments_office_level')) {
+            $this->db->exec("
+                ALTER TABLE departments
+                ADD KEY idx_departments_office_level (office_level)
+            ");
+        }
+    }
+
+    private function columnExists($table, $column)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = :schema_name
+            AND TABLE_NAME = :table_name
+            AND COLUMN_NAME = :column_name
+        ");
+
+        $stmt->execute([
+            'schema_name' => DB_NAME,
+            'table_name' => $table,
+            'column_name' => $column
+        ]);
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    private function indexExists($table, $index)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = :schema_name
+            AND TABLE_NAME = :table_name
+            AND INDEX_NAME = :index_name
+        ");
+
+        $stmt->execute([
+            'schema_name' => DB_NAME,
+            'table_name' => $table,
+            'index_name' => $index
+        ]);
+
+        return (int) $stmt->fetchColumn() > 0;
     }
 
     public function getAll()
     {
-        $stmt = $this->db->query("SELECT * FROM departments ORDER BY division_name ASC");
+        $stmt = $this->db->query("
+            SELECT *
+            FROM departments
+            ORDER BY
+                CASE office_level
+                    WHEN 'department' THEN 1
+                    WHEN 'division' THEN 2
+                    WHEN 'unit' THEN 3
+                    ELSE 4
+                END,
+                division_name ASC
+        ");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -25,7 +122,7 @@ class Department
         $stmt = $this->db->query("
             SELECT *
             FROM departments
-            WHERE parent_id IS NULL
+            WHERE office_level = 'department'
             ORDER BY division_name ASC
         ");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -49,8 +146,8 @@ class Department
             SELECT *
             FROM departments
             WHERE (
-                (parent_id IS NULL AND id <> :excluded_parent_department_id)
-                OR parent_id = :child_parent_department_id
+                (office_level = 'department' AND id <> :excluded_parent_department_id)
+                OR (office_level = 'division' AND parent_id = :child_parent_department_id)
             )
             ORDER BY
                 CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END,
@@ -69,7 +166,7 @@ class Department
             SELECT p.*,
                    (SELECT COUNT(*) FROM departments c WHERE c.parent_id = p.id) AS division_count
             FROM departments p
-            WHERE p.parent_id IS NULL
+            WHERE p.office_level = 'department'
             ORDER BY p.department_name ASC
         ");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -81,10 +178,25 @@ class Department
             SELECT *
             FROM departments
             WHERE parent_id = :parent_department_id
+            AND office_level = 'division'
             ORDER BY division_name ASC
         ");
 
         $stmt->execute(['parent_department_id' => $parent_department_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getUnitsForDivision($division_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT *
+            FROM departments
+            WHERE parent_id = :division_id
+            AND office_level = 'unit'
+            ORDER BY division_name ASC
+        ");
+
+        $stmt->execute(['division_id' => (int) $division_id]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -164,8 +276,15 @@ class Department
 
             $children = $this->db->prepare("UPDATE departments SET department_name = :department_name WHERE parent_id = :id");
             $children->execute(['department_name' => $departmentName, 'id' => (int) $id]);
+            $descendants = $this->db->prepare("
+                UPDATE departments u
+                JOIN departments d ON d.id = u.parent_id
+                SET u.department_name = :department_name
+                WHERE d.parent_id = :id
+            ");
+            $descendants->execute(['department_name' => $departmentName, 'id' => (int) $id]);
             $this->db->commit();
-            return $stmt->rowCount() > 0 || $children->rowCount() > 0;
+            return $stmt->rowCount() > 0 || $children->rowCount() > 0 || $descendants->rowCount() > 0;
         } catch (Throwable $e) {
             if ($this->db->inTransaction()) {
                 $this->db->rollBack();
@@ -177,18 +296,38 @@ class Department
     public function createDivision($parentId, $divisionName, $code, $email)
     {
         $parent = $this->getDepartmentById((int) $parentId);
-        if (!$parent || $parent['parent_id'] !== null) {
+        if (!$parent || ($parent['office_level'] ?? '') !== 'department') {
             return false;
         }
 
         $stmt = $this->db->prepare("
-            INSERT INTO departments (parent_id, department_name, division_name, code, email)
-            VALUES (:parent_id, :department_name, :division_name, :code, :email)
+            INSERT INTO departments (parent_id, office_level, can_release, department_name, division_name, code, email)
+            VALUES (:parent_id, 'division', 1, :department_name, :division_name, :code, :email)
         ");
         return $stmt->execute([
             'parent_id' => (int) $parentId,
             'department_name' => $parent['department_name'],
             'division_name' => $divisionName,
+            'code' => $code,
+            'email' => $email
+        ]);
+    }
+
+    public function createUnit($divisionId, $unitName, $code, $email)
+    {
+        $division = $this->getDepartmentById((int) $divisionId);
+        if (!$division || ($division['office_level'] ?? '') !== 'division') {
+            return false;
+        }
+
+        $stmt = $this->db->prepare("
+            INSERT INTO departments (parent_id, office_level, can_release, department_name, division_name, code, email)
+            VALUES (:parent_id, 'unit', 0, :department_name, :division_name, :code, :email)
+        ");
+        return $stmt->execute([
+            'parent_id' => (int) $divisionId,
+            'department_name' => $division['department_name'],
+            'division_name' => $unitName,
             'code' => $code,
             'email' => $email
         ]);
@@ -211,16 +350,75 @@ class Department
         return $stmt->rowCount() > 0;
     }
 
+    public function updateUnit($id, $divisionId, $unitName, $code, $email)
+    {
+        $stmt = $this->db->prepare("
+            UPDATE departments
+            SET division_name = :division_name, code = :code, email = :email, can_release = 0
+            WHERE id = :id
+            AND parent_id = :parent_id
+            AND office_level = 'unit'
+        ");
+        $stmt->execute([
+            'id' => (int) $id,
+            'parent_id' => (int) $divisionId,
+            'division_name' => $unitName,
+            'code' => $code,
+            'email' => $email
+        ]);
+        return $stmt->rowCount() > 0;
+    }
+
     public function isParentDepartment($department_id)
     {
         $stmt = $this->db->prepare("
             SELECT COUNT(*)
             FROM departments
             WHERE id = :department_id
-            AND parent_id IS NULL
+            AND office_level = 'department'
         ");
 
         $stmt->execute(['department_id' => $department_id]);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function isDivision($department_id)
+    {
+        return $this->hasOfficeLevel($department_id, 'division');
+    }
+
+    public function isUnit($department_id)
+    {
+        return $this->hasOfficeLevel($department_id, 'unit');
+    }
+
+    public function canRelease($department_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM departments
+            WHERE id = :department_id
+            AND can_release = 1
+            AND office_level <> 'unit'
+        ");
+
+        $stmt->execute(['department_id' => (int) $department_id]);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    private function hasOfficeLevel($department_id, $officeLevel)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM departments
+            WHERE id = :department_id
+            AND office_level = :office_level
+        ");
+
+        $stmt->execute([
+            'department_id' => (int) $department_id,
+            'office_level' => $officeLevel
+        ]);
         return (int) $stmt->fetchColumn() > 0;
     }
 
@@ -237,7 +435,7 @@ class Department
             SELECT COUNT(*)
             FROM departments
             WHERE id IN ($placeholders)
-            AND parent_id IS NULL
+            AND office_level = 'department'
         ");
 
         $stmt->execute($department_ids);
@@ -263,6 +461,7 @@ class Department
             FROM departments
             WHERE id IN ($placeholders)
             AND parent_id = ?
+            AND office_level = 'division'
         ");
 
         $params = $department_ids;
@@ -279,8 +478,8 @@ class Department
             FROM departments
             WHERE id = :target_department_id
             AND (
-                (parent_id IS NULL AND id <> :excluded_parent_department_id)
-                OR parent_id = :child_parent_department_id
+                (office_level = 'department' AND id <> :excluded_parent_department_id)
+                OR (office_level = 'division' AND parent_id = :child_parent_department_id)
             )
         ");
 

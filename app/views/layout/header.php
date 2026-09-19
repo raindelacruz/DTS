@@ -172,29 +172,6 @@
             border: 1px solid rgba(255,255,255,0.85); box-shadow: var(--shadow-card);
         }
         .page-hero.compact { padding: 0.95rem 1.05rem; }
-        .instruction-card {
-            margin-bottom: 1rem;
-            padding: 0.85rem 1rem;
-            border-radius: 16px;
-            background: linear-gradient(135deg, #ecfeff 0%, #f8fafc 100%);
-            border: 1px solid #cfe9ec;
-            box-shadow: var(--shadow-card);
-        }
-        .instruction-card h3 {
-            margin: 0 0 0.3rem;
-            font-size: 0.82rem;
-            font-weight: 800;
-            color: #0f766e;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        .instruction-card p {
-            margin: 0;
-            color: #334155;
-            line-height: 1.45;
-            font-size: 0.92rem;
-        }
-        .instruction-card strong { color: #0f172a; }
         .form-control, .form-select, textarea.form-control {
             border-radius: 12px; border-color: #dbe4ee; padding: 0.62rem 0.85rem; box-shadow: none;
             min-height: 2.65rem;
@@ -408,7 +385,6 @@
                 align-items: center;
             }
             .page-hero .btn { padding: 0.48rem 0.62rem; font-size: 0.88rem; }
-            .instruction-card { display: none; }
             .dashboard-stat-row,
             .documents-stat-row,
             .das-stat-row { display: none; }
@@ -633,10 +609,12 @@
                     <div class="dropdown-menu dropdown-menu-end notification-menu">
                         <div class="notification-head">
                             <strong>Notifications</strong>
-                            <form action="<?php echo URLROOT; ?>/notifications/readAll" method="POST">
-                                <?php echo csrfInput(); ?>
-                                <button type="submit" class="btn btn-sm btn-outline-secondary">Mark all read</button>
-                            </form>
+                            <?php if ($headerUnreadCount > 0): ?>
+                                <form action="<?php echo URLROOT; ?>/notifications/readAll" method="POST">
+                                    <?php echo csrfInput(); ?>
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary">Mark all read</button>
+                                </form>
+                            <?php endif; ?>
                         </div>
                         <?php if (!empty($headerNotifications)): ?>
                             <?php foreach ($headerNotifications as $notification): ?>

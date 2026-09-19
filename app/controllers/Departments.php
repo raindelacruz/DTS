@@ -69,10 +69,12 @@ class Departments extends Controller
         $this->view('departments/show', [
             'department' => $department,
             'divisions' => $this->departmentModel->getChildDepartmentsForParent($id),
+            'units_by_division' => $this->unitsByDivision($id),
             'department_form' => pullFormState('department_edit_' . $id, $department),
             'division_form' => pullFormState('division_add_' . $id, [
                 'division_name' => '', 'code' => '', 'email' => ''
-            ])
+            ]),
+            'unit_forms' => $this->unitForms($id)
         ]);
     }
 
@@ -144,6 +146,53 @@ class Departments extends Controller
         redirect('/departments/show/' . $parentId, 303);
     }
 
+    public function addUnit($id)
+    {
+        $divisionId = (int) $id;
+        $values = $this->values(false);
+        $redirectDepartmentId = $this->getDepartmentRootId($divisionId);
+        try {
+            requirePost();
+            validateCsrfOrFail();
+            $this->requireDivision($divisionId);
+            $this->validate($values, null, $divisionId, 'unit');
+            $this->departmentModel->createUnit($divisionId, $values['division_name'], $values['code'], $values['email']);
+            flash('departments_success', 'Unit added successfully.', 'success');
+        } catch (ValidationException $e) {
+            storeFormState('unit_add_' . $divisionId, $values, $e->getErrors(), $e->getMessage());
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'departments.addUnit', 'division_id' => $divisionId]);
+            flash('departments_error', 'The unit could not be added.', 'error');
+        }
+        redirect($redirectDepartmentId > 0 ? '/departments/show/' . $redirectDepartmentId : '/departments', 303);
+    }
+
+    public function updateUnit($id)
+    {
+        $unitId = (int) $id;
+        $divisionId = (int) ($_POST['division_id'] ?? 0);
+        $values = $this->values(false);
+        $redirectDepartmentId = $this->getDepartmentRootId($divisionId);
+        try {
+            requirePost();
+            validateCsrfOrFail();
+            $this->requireDivision($divisionId);
+            $unit = $this->departmentModel->getDepartmentById($unitId);
+            if (!$unit || (int) $unit['parent_id'] !== $divisionId || ($unit['office_level'] ?? '') !== 'unit') {
+                throw new ValidationException('Unit not found.');
+            }
+            $this->validate($values, $unitId, $divisionId, 'unit');
+            $this->departmentModel->updateUnit($unitId, $divisionId, $values['division_name'], $values['code'], $values['email']);
+            flash('departments_success', 'Unit updated successfully.', 'success');
+        } catch (ValidationException $e) {
+            flash('departments_error', $e->getMessage(), 'error');
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'departments.updateUnit', 'unit_id' => $unitId]);
+            flash('departments_error', 'The unit could not be updated.', 'error');
+        }
+        redirect($redirectDepartmentId > 0 ? '/departments/show/' . $redirectDepartmentId : '/departments', 303);
+    }
+
     private function requireParent($id)
     {
         $department = $this->departmentModel->getDepartmentById((int) $id);
@@ -151,6 +200,54 @@ class Departments extends Controller
             throw new ValidationException('Department not found.');
         }
         return $department;
+    }
+
+    private function requireDivision($id)
+    {
+        $division = $this->departmentModel->getDepartmentById((int) $id);
+        if (!$division || ($division['office_level'] ?? '') !== 'division') {
+            throw new ValidationException('Division not found.');
+        }
+        return $division;
+    }
+
+    private function getDepartmentRootId($officeId)
+    {
+        $office = $this->departmentModel->getDepartmentById((int) $officeId);
+        if (!$office) {
+            return 0;
+        }
+
+        if (($office['office_level'] ?? '') === 'department') {
+            return (int) $office['id'];
+        }
+
+        $parent = $this->departmentModel->getDepartmentById((int) ($office['parent_id'] ?? 0));
+        if ($parent && ($parent['office_level'] ?? '') === 'department') {
+            return (int) $parent['id'];
+        }
+
+        return $parent ? $this->getDepartmentRootId((int) $parent['id']) : 0;
+    }
+
+    private function unitsByDivision($departmentId)
+    {
+        $unitsByDivision = [];
+        foreach ($this->departmentModel->getChildDepartmentsForParent((int) $departmentId) as $division) {
+            $unitsByDivision[(int) $division['id']] = $this->departmentModel->getUnitsForDivision((int) $division['id']);
+        }
+        return $unitsByDivision;
+    }
+
+    private function unitForms($departmentId)
+    {
+        $forms = [];
+        foreach ($this->departmentModel->getChildDepartmentsForParent((int) $departmentId) as $division) {
+            $forms[(int) $division['id']] = pullFormState('unit_add_' . (int) $division['id'], [
+                'division_name' => '', 'code' => '', 'email' => ''
+            ]);
+        }
+        return $forms;
     }
 
     private function values($withDepartment)
@@ -166,7 +263,7 @@ class Departments extends Controller
         return $values;
     }
 
-    private function validate($values, $excludeId = null, $parentId = null)
+    private function validate($values, $excludeId = null, $parentId = null, $officeLevel = 'division')
     {
         $errors = [];
         if (array_key_exists('department_name', $values) && $values['department_name'] === '') {
@@ -175,7 +272,7 @@ class Departments extends Controller
             $errors['department_name'] = 'Department name must not exceed 150 characters.';
         }
         if ($values['division_name'] === '') {
-            $errors['division_name'] = 'Office or division name is required.';
+            $errors['division_name'] = $officeLevel === 'unit' ? 'Unit name is required.' : 'Office or division name is required.';
         } elseif (strlen($values['division_name']) > 150) {
             $errors['division_name'] = 'Office or division name must not exceed 150 characters.';
         }
@@ -193,7 +290,7 @@ class Departments extends Controller
         }
         if ($parentId !== null && $values['division_name'] !== '' &&
             $this->departmentModel->divisionNameExists($parentId, $values['division_name'], $excludeId)) {
-            $errors['division_name'] = 'That division already exists in this department.';
+            $errors['division_name'] = $officeLevel === 'unit' ? 'That unit already exists in this division.' : 'That division already exists in this department.';
         }
         if ($errors) throw new ValidationException('Please correct the highlighted fields.', $errors);
     }

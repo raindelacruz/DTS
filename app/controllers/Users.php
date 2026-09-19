@@ -85,6 +85,7 @@ class Users extends Controller
                 'user' => $user,
                 'departments' => $this->departmentModel->getAll(),
                 'roles' => User::roles(),
+                'access_history' => $this->userModel->getAccessChangeHistory((int) $id),
                 'success' => pullFlash('users_success')['message'] ?? '',
                 'error' => pullFlash('users_error')['message'] ?? ''
             ];
@@ -246,6 +247,7 @@ class Users extends Controller
     public function updateRole($id)
     {
         $role = trim($_POST['role'] ?? '');
+        $reason = trim($_POST['reason'] ?? '');
         $redirectPath = '/users/show/' . (int) $id;
 
         try {
@@ -271,7 +273,14 @@ class Users extends Controller
                 redirect($redirectPath, 303);
             }
 
-            $this->userModel->updateRole((int) $id, $role);
+            $this->userModel->updateRoleWithHistory(
+                (int) $id,
+                $role,
+                (int) $_SESSION['user_id'],
+                $user->role,
+                (int) $user->department_id,
+                $reason
+            );
             securityAudit('user_role_changed', (int) $_SESSION['user_id'], (int) $id, ['from' => $user->role, 'to' => $role]);
 
             $this->notificationModel->create(
@@ -299,6 +308,7 @@ class Users extends Controller
     public function updateDepartment($id)
     {
         $departmentId = (int) ($_POST['department_id'] ?? 0);
+        $reason = trim($_POST['reason'] ?? '');
         $redirectPath = '/users/show/' . (int) $id;
 
         try {
@@ -320,7 +330,14 @@ class Users extends Controller
                 redirect($redirectPath, 303);
             }
 
-            $this->userModel->updateDepartment((int) $id, $departmentId);
+            $this->userModel->updateDepartmentWithHistory(
+                (int) $id,
+                $departmentId,
+                (int) $_SESSION['user_id'],
+                $user->role,
+                (int) $user->department_id,
+                $reason
+            );
             securityAudit('user_department_changed', (int) $_SESSION['user_id'], (int) $id, ['from' => (int) $user->department_id, 'to' => $departmentId]);
 
             if ((int) $user->id === (int) $_SESSION['user_id']) {

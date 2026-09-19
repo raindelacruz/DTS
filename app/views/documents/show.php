@@ -5,9 +5,4 @@
     <div><a href="<?php echo URLROOT; ?>/documents" class="btn btn-outline-secondary">Back to Documents</a></div>
 </div>
 
-<div class="instruction-card">
-    <h3>Quick Guide</h3>
-    <p>This page is a placeholder for older document screens. Return to the main documents module to continue tracking, viewing details, or managing routing actions.</p>
-</div>
-
 <?php require_once APPROOT . '/views/layout/footer.php'; ?>

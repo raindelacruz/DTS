@@ -38,11 +38,6 @@ $renderTimelineRemarks = function ($log) use ($document) {
     <div class="d-flex gap-2 flex-wrap"><a href="<?php echo URLROOT; ?>/documents" class="btn btn-outline-secondary">Back to Documents</a></div>
 </div>
 
-<div class="instruction-card">
-    <h3>Quick Guide</h3>
-    <p>Read the status, routing, and timeline before taking action. The buttons in the <strong>Actions</strong> panel appear only when your current role and department are allowed to release, receive, clear, note, or forward this document.</p>
-</div>
-
 <div class="row g-4 mb-4">
     <div class="col-lg-8">
         <div class="app-card p-4 h-100">
@@ -124,6 +119,31 @@ $renderTimelineRemarks = function ($log) use ($document) {
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
+            <?php if (!empty($unitAssignment)): ?>
+                <div class="mt-4 p-3 rounded-3" style="background:#eff6ff; border:1px solid #bfdbfe;">
+                    <div class="fw-bold mb-1">Unit Assignment</div>
+                    <div class="small text-muted mb-2">
+                        Assigned to <?php echo htmlspecialchars(($unitAssignment['assigned_to_unit_name'] ?? 'Unit') . ' - ' . ($unitAssignment['assigned_to_name'] ?? 'Manager')); ?>
+                        by <?php echo htmlspecialchars($unitAssignment['assigned_by_name'] ?? 'Division manager'); ?>
+                        on <?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($unitAssignment['assigned_at']))); ?>
+                    </div>
+                    <div><span class="fw-semibold">Status:</span> <?php echo htmlspecialchars($unitAssignment['status']); ?></div>
+                    <?php if (!empty($unitAssignment['completed_at'])): ?>
+                        <div><span class="fw-semibold">Completed:</span> <?php echo htmlspecialchars(date('M d, Y h:i A', strtotime($unitAssignment['completed_at']))); ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($unitAssignment['completion_attachment'])): ?>
+                        <div class="mt-2">
+                            <a href="<?php echo URLROOT; ?>/documents/internalAssignmentAttachment/<?php echo (int) $document['id']; ?>/<?php echo rawurlencode($unitAssignment['completion_attachment']); ?>" target="_blank" class="btn btn-sm btn-outline-primary">View Unit Output</a>
+                        </div>
+                    <?php endif; ?>
+                    <?php if (!empty($unitAssignment['return_remarks'])): ?>
+                        <div class="mt-2"><span class="fw-semibold">Return remarks:</span> <?php echo nl2br(htmlspecialchars($unitAssignment['return_remarks'])); ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($unitAssignment['instructions'])): ?>
+                        <div class="mt-2 text-body-secondary"><?php echo nl2br(htmlspecialchars($unitAssignment['instructions'])); ?></div>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
     <div class="col-lg-4">
@@ -153,7 +173,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                         <div class="text-body-secondary"><?php echo nl2br(htmlspecialchars($recipientActionDetails['instruction'] ?: 'N/A')); ?></div>
                     </div>
                 <?php endif; ?>
-                <?php if ($document['status'] === 'Draft' && $document['origin_department_id'] == $_SESSION['department_id']): ?>
+                <?php if (!empty($canReleaseOffice) && $document['status'] === 'Draft' && $document['origin_department_id'] == $_SESSION['department_id']): ?>
                     <a href="<?php echo URLROOT; ?>/documents/edit/<?php echo $document['id']; ?>" class="btn btn-outline-secondary w-100">Edit Draft</a>
                     <form action="<?php echo URLROOT; ?>/documents/release/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>
@@ -261,7 +281,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                                     aria-expanded="false"
                                     data-route-multiselect-toggle
                                 >
-                                    <span data-route-multiselect-summary>Select staff</span>
+                                    <span data-route-multiselect-summary data-placeholder="Select staff">Select staff</span>
                                 </button>
                                 <div class="route-multiselect-menu d-none" data-route-multiselect-menu>
                                     <input
@@ -299,6 +319,62 @@ $renderTimelineRemarks = function ($log) use ($document) {
                             <textarea id="internal_instruction" name="internal_instruction" class="form-control" rows="3"></textarea>
                         </div>
                         <button type="submit" class="btn btn-outline-dark w-100">Delegate to Staff</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canDelegateToUnit)): ?>
+                    <form action="<?php echo URLROOT; ?>/documents/delegateToUnit/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-document-staff-delegate-form>
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Delegate to Unit</div>
+                        <div class="mb-2">
+                            <label id="document_delegate_unit_label" class="form-label small fw-semibold">Unit manager</label>
+                            <div class="route-multiselect document-staff-multiselect" data-document-staff-multiselect data-route-required>
+                                <button
+                                    type="button"
+                                    class="form-select route-multiselect-toggle text-start"
+                                    aria-labelledby="document_delegate_unit_label"
+                                    aria-expanded="false"
+                                    data-route-multiselect-toggle
+                                >
+                                    <span data-route-multiselect-summary data-placeholder="Select unit manager">Select unit manager</span>
+                                </button>
+                                <div class="route-multiselect-menu d-none" data-route-multiselect-menu>
+                                    <input
+                                        type="search"
+                                        class="form-control route-search-input mb-2"
+                                        placeholder="Search unit managers"
+                                        aria-label="Search unit managers"
+                                        data-route-multiselect-search
+                                    >
+                                    <div class="route-checkbox-group route-multiselect-options" role="group" aria-labelledby="document_delegate_unit_label">
+                                        <?php foreach ($unitManagers as $manager): ?>
+                                            <?php
+                                            $managerId = (int) $manager['id'];
+                                            $managerName = trim(($manager['firstname'] ?? '') . ' ' . (!empty($manager['middle_initial']) ? $manager['middle_initial'] . '. ' : '') . ($manager['lastname'] ?? ''));
+                                            $unitName = trim((string) ($manager['unit_name'] ?? 'Unit'));
+                                            ?>
+                                            <label class="route-checkbox-item" for="document_delegate_unit_<?php echo $managerId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($unitName . ' ' . $managerName), ENT_QUOTES, 'UTF-8'); ?>">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    id="document_delegate_unit_<?php echo $managerId; ?>"
+                                                    name="assigned_to_user_ids[]"
+                                                    value="<?php echo $managerId; ?>"
+                                                >
+                                                <span><?php echo htmlspecialchars($unitName . ' - ' . $managerName); ?></span>
+                                            </label>
+                                        <?php endforeach; ?>
+                                        <div class="route-empty-state d-none" data-route-empty>No unit managers match your search.</div>
+                                    </div>
+                                </div>
+                                <div class="invalid-feedback" data-route-required-error>Select at least one unit manager.</div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="unit_instruction">Instruction</label>
+                            <textarea id="unit_instruction" name="unit_instruction" class="form-control" rows="3"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-outline-dark w-100">Delegate to Unit</button>
                     </form>
                 <?php endif; ?>
 
@@ -366,6 +442,25 @@ $renderTimelineRemarks = function ($log) use ($document) {
                             <textarea id="internal_return_remarks" name="internal_return_remarks" class="form-control" rows="3" required></textarea>
                         </div>
                         <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Return this internal assignment to staff?');">Return to Staff</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($canReturnUnitAssignment)): ?>
+                    <?php if (!empty($canConfirmUnitAssignment)): ?>
+                        <form action="<?php echo URLROOT; ?>/documents/confirmUnitAssignment/<?php echo $document['id']; ?>" method="POST" class="m-0">
+                            <?php echo csrfInput(); ?>
+                            <button type="submit" class="btn btn-success w-100" onclick="return confirm('Confirm this unit assignment completion?');">Confirm Unit Output</button>
+                        </form>
+                    <?php endif; ?>
+
+                    <form action="<?php echo URLROOT; ?>/documents/returnUnitAssignment/<?php echo $document['id']; ?>" method="POST" class="app-card p-3 mt-2" style="background:#fff7ed; border:1px solid #fed7aa; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-3">Return Unit Assignment</div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold" for="unit_return_remarks">Remarks for unit manager</label>
+                            <textarea id="unit_return_remarks" name="unit_return_remarks" class="form-control" rows="3" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Return this unit assignment to the unit manager?');">Return to Unit</button>
                     </form>
                 <?php endif; ?>
 
@@ -503,135 +598,147 @@ $renderTimelineRemarks = function ($log) use ($document) {
 
 <script>
 (() => {
-    const form = document.querySelector('[data-document-staff-delegate-form]');
-    if (!form) {
+    const forms = Array.prototype.slice.call(document.querySelectorAll('[data-document-staff-delegate-form]'));
+    if (forms.length === 0) {
         return;
     }
 
-    const container = form.querySelector('[data-document-staff-multiselect]');
-    const toggle = container ? container.querySelector('[data-route-multiselect-toggle]') : null;
-    const menu = container ? container.querySelector('[data-route-multiselect-menu]') : null;
-    const search = container ? container.querySelector('[data-route-multiselect-search]') : null;
-    const summary = container ? container.querySelector('[data-route-multiselect-summary]') : null;
-    const checks = container ? Array.prototype.slice.call(container.querySelectorAll('input[type="checkbox"]')) : [];
-    const items = container ? Array.prototype.slice.call(container.querySelectorAll('.route-checkbox-item')) : [];
-    const empty = container ? container.querySelector('[data-route-empty]') : null;
-    const error = container ? container.querySelector('[data-route-required-error]') : null;
+    forms.forEach((form) => {
+        const container = form.querySelector('[data-document-staff-multiselect]');
+        const toggle = container ? container.querySelector('[data-route-multiselect-toggle]') : null;
+        const menu = container ? container.querySelector('[data-route-multiselect-menu]') : null;
+        const search = container ? container.querySelector('[data-route-multiselect-search]') : null;
+        const summary = container ? container.querySelector('[data-route-multiselect-summary]') : null;
+        const checks = container ? Array.prototype.slice.call(container.querySelectorAll('input[type="checkbox"]')) : [];
+        const items = container ? Array.prototype.slice.call(container.querySelectorAll('.route-checkbox-item')) : [];
+        const empty = container ? container.querySelector('[data-route-empty]') : null;
+        const error = container ? container.querySelector('[data-route-required-error]') : null;
 
-    function selectedLabels() {
-        return checks
-            .filter((checkbox) => checkbox.checked)
-            .map((checkbox) => {
-                const label = checkbox.closest('.route-checkbox-item');
-                return label ? label.textContent.trim() : '';
-            })
-            .filter(Boolean);
-    }
-
-    function updateSummary() {
-        if (!summary) {
-            return;
+        function selectedLabels() {
+            return checks
+                .filter((checkbox) => checkbox.checked)
+                .map((checkbox) => {
+                    const label = checkbox.closest('.route-checkbox-item');
+                    return label ? label.textContent.trim() : '';
+                })
+                .filter(Boolean);
         }
 
-        const labels = selectedLabels();
-        if (labels.length === 0) {
-            summary.textContent = 'Select staff';
-        } else if (labels.length === 1) {
-            summary.textContent = labels[0];
-        } else {
-            summary.textContent = labels.length + ' staff selected';
-        }
-    }
-
-    function filterOptions() {
-        if (!search) {
-            return;
-        }
-
-        const query = search.value.trim().toLowerCase();
-        let visibleCount = 0;
-        items.forEach((item) => {
-            const label = item.getAttribute('data-route-label') || '';
-            const matches = query === '' || label.indexOf(query) !== -1;
-            item.classList.toggle('d-none', !matches);
-            if (matches) {
-                visibleCount++;
+        function updateSummary() {
+            if (!summary) {
+                return;
             }
-        });
-        if (empty) {
-            empty.classList.toggle('d-none', visibleCount !== 0);
-        }
-    }
 
-    function setOpen(isOpen) {
-        if (!container || !menu || !toggle) {
-            return;
+            const labels = selectedLabels();
+            if (labels.length === 0) {
+                summary.textContent = summary.dataset.placeholder || 'Select';
+            } else if (labels.length === 1) {
+                summary.textContent = labels[0];
+            } else {
+                summary.textContent = labels.length + ' selected';
+            }
         }
 
-        container.classList.toggle('is-open', isOpen);
-        menu.classList.toggle('d-none', !isOpen);
-        toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-        if (isOpen && search) {
-            search.focus();
-            filterOptions();
-        }
-    }
+        function filterOptions() {
+            if (!search) {
+                return;
+            }
 
-    function showRequiredError() {
-        if (container) {
-            container.classList.add('is-invalid');
+            const query = search.value.trim().toLowerCase();
+            let visibleCount = 0;
+            items.forEach((item) => {
+                const label = item.getAttribute('data-route-label') || '';
+                const matches = query === '' || label.indexOf(query) !== -1;
+                item.classList.toggle('d-none', !matches);
+                if (matches) {
+                    visibleCount++;
+                }
+            });
+            if (empty) {
+                empty.classList.toggle('d-none', visibleCount !== 0);
+            }
         }
-        if (error) {
-            error.classList.add('d-block');
-        }
-        setOpen(true);
-    }
 
-    if (toggle) {
-        toggle.addEventListener('click', () => {
-            setOpen(toggle.getAttribute('aria-expanded') !== 'true');
-        });
-    }
-    if (search) {
-        search.addEventListener('input', filterOptions);
-    }
-    checks.forEach((checkbox) => {
-        checkbox.addEventListener('change', () => {
-            updateSummary();
+        function setOpen(isOpen) {
+            if (!container || !menu || !toggle) {
+                return;
+            }
+
+            container.classList.toggle('is-open', isOpen);
+            menu.classList.toggle('d-none', !isOpen);
+            toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            if (isOpen && search) {
+                search.focus();
+                filterOptions();
+            }
+        }
+
+        function showRequiredError() {
             if (container) {
-                container.classList.remove('is-invalid');
+                container.classList.add('is-invalid');
             }
             if (error) {
-                error.classList.remove('d-block');
+                error.classList.add('d-block');
+            }
+            setOpen(true);
+        }
+
+        if (toggle) {
+            toggle.addEventListener('click', () => {
+                setOpen(toggle.getAttribute('aria-expanded') !== 'true');
+            });
+        }
+        if (search) {
+            search.addEventListener('input', filterOptions);
+        }
+        checks.forEach((checkbox) => {
+            checkbox.addEventListener('change', () => {
+                updateSummary();
+                if (container) {
+                    container.classList.remove('is-invalid');
+                }
+                if (error) {
+                    error.classList.remove('d-block');
+                }
+            });
+        });
+
+        form.addEventListener('submit', (event) => {
+            if (!checks.some((checkbox) => checkbox.checked)) {
+                event.preventDefault();
+                showRequiredError();
+                return;
+            }
+
+            if (!confirm('Delegate this document?')) {
+                event.preventDefault();
             }
         });
+
+        document.addEventListener('click', (event) => {
+            if (container && !container.contains(event.target)) {
+                setOpen(false);
+            }
+        });
+
+        updateSummary();
+        filterOptions();
     });
 
-    form.addEventListener('submit', (event) => {
-        if (!checks.some((checkbox) => checkbox.checked)) {
-            event.preventDefault();
-            showRequiredError();
-            return;
-        }
-
-        if (!confirm('Delegate this document to the selected staff member(s)?')) {
-            event.preventDefault();
-        }
-    });
-
-    document.addEventListener('click', (event) => {
-        if (container && !container.contains(event.target)) {
-            setOpen(false);
-        }
-    });
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-            setOpen(false);
+            forms.forEach((form) => {
+                const container = form.querySelector('[data-document-staff-multiselect]');
+                const toggle = container ? container.querySelector('[data-route-multiselect-toggle]') : null;
+                const menu = container ? container.querySelector('[data-route-multiselect-menu]') : null;
+                if (container && toggle && menu) {
+                    container.classList.remove('is-open');
+                    menu.classList.add('d-none');
+                    toggle.setAttribute('aria-expanded', 'false');
+                }
+            });
         }
     });
-
-    updateSummary();
-    filterOptions();
 })();
 </script>
 

@@ -16,11 +16,6 @@ $filters = $data['filters'] ?? [];
     <div><h1 class="section-title"><?php echo htmlspecialchars($data['title']); ?></h1></div>
 </div>
 
-<div class="instruction-card">
-    <h3>Quick Guide</h3>
-    <p>Review documents created or sent by your department here. Use the filters to find a specific record quickly, then open it to confirm release status or follow the routing history.</p>
-</div>
-
 <div class="app-card list-filter-card p-4 mb-4">
     <form method="GET" class="row g-3 align-items-end">
         <div class="col-lg-3 col-md-6">

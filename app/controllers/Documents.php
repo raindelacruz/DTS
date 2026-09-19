@@ -39,10 +39,25 @@ class Documents extends Controller
         }
     }
 
+    private function currentOffice()
+    {
+        return $this->departmentModel->getDepartmentById((int) $_SESSION['department_id']);
+    }
+
+    private function currentOfficeLevel()
+    {
+        $office = $this->currentOffice();
+        return $office['office_level'] ?? '';
+    }
+
     private function isDivisionDepartment($departmentId)
     {
-        $department = $this->departmentModel->getDepartmentById((int) $departmentId);
-        return $department && $department['parent_id'] !== null;
+        return $this->departmentModel->isDivision((int) $departmentId);
+    }
+
+    private function isUnitDepartment($departmentId)
+    {
+        return $this->departmentModel->isUnit((int) $departmentId);
     }
 
     private function isDivisionManager()
@@ -55,8 +70,51 @@ class Documents extends Controller
         return $this->isStaff() && $this->isDivisionDepartment((int) $_SESSION['department_id']);
     }
 
+    private function isUnitManager()
+    {
+        return $this->isManager() && $this->isUnitDepartment((int) $_SESSION['department_id']);
+    }
+
+    private function isUnitStaff()
+    {
+        return $this->isStaff() && $this->isUnitDepartment((int) $_SESSION['department_id']);
+    }
+
+    private function canCurrentManagerDelegateToUnit($documentId, $departmentId)
+    {
+        if (!$this->isManager() || !$this->isDivisionDepartment($departmentId)) {
+            return false;
+        }
+
+        $document = $this->documentModel->findById((int) $documentId);
+        $route = $this->documentModel->getDepartmentRouteRole($documentId, $departmentId);
+        $managerCompleted = $this->managerHasSpecificAction($documentId, $departmentId, 'Manager Completed');
+        $existingUnitAssignment = $this->documentModel->getCurrentUnitAssignmentForDivision($documentId, $departmentId);
+
+        return $document
+            && ($document['status'] ?? '') !== 'Returned'
+            && !$managerCompleted
+            && !$existingUnitAssignment
+            && $route
+            && (int) ($route['is_cleared'] ?? 0) === 1
+            && in_array($route['route_type'] ?? '', ['DELEGATE', 'TO'], true)
+            && $this->managerHasAcknowledged($documentId, $departmentId);
+    }
+
     private function canCurrentManagerDelegateInternally($documentId, $departmentId)
     {
+        if ($this->isUnitManager()) {
+            $unitAssignment = $this->documentModel->getCurrentUnitAssignmentForManager(
+                $documentId,
+                (int) $_SESSION['user_id'],
+                $departmentId
+            );
+
+            return $unitAssignment
+                && ($unitAssignment['status'] ?? '') === 'Received'
+                && !$this->documentModel->getActiveChildInternalAssignment($documentId, (int) $unitAssignment['id']);
+        }
+
         if (!$this->isManager() || !$this->isDivisionDepartment($departmentId)) {
             return false;
         }
@@ -417,14 +475,18 @@ class Documents extends Controller
         }
 
         $deptId = (int) $_SESSION['department_id'];
-        $allowed = $this->documentModel->canDepartmentViewDocument($id, $deptId);
+        $officeAllowed = $this->documentModel->canDepartmentViewDocument($id, $deptId);
+        $personalAllowed = $this->documentModel->canUserViewPersonalDocument($id, (int) $_SESSION['user_id']);
+        $allowed = $officeAllowed || $personalAllowed;
         $managerStaffHandled = $this->managerStaffHandled((int) $id, $deptId);
 
         if ($this->isManager()) {
-            $allowed = $allowed && (
+            $managerAssignment = $this->documentModel->getCurrentInternalAssignmentForUser($id, (int) $_SESSION['user_id']);
+            $allowed = $personalAllowed || ($officeAllowed && (
                 (int) $document['origin_department_id'] === $deptId
                 || $managerStaffHandled
-            );
+                || ($managerAssignment && (int) ($managerAssignment['assigned_to_department_id'] ?? 0) === $deptId)
+            ));
         }
 
         if (!$allowed) {
@@ -833,7 +895,8 @@ class Documents extends Controller
     {
         return !$this->isManager()
             && $openReturn
-            && (int) ($openReturn['releasing_department_id'] ?? 0) === (int) $deptId;
+            && (int) ($openReturn['releasing_department_id'] ?? 0) === (int) $deptId
+            && $this->departmentModel->canRelease((int) $deptId);
     }
 
     private function renderForwardForm($document)
@@ -852,7 +915,7 @@ class Documents extends Controller
             $department_id = (int) $_SESSION['department_id'];
             $filters = $this->getListFilters();
             $pagination = paginationRequest();
-            $result = $this->documentModel->paginateForDepartment($department_id, $filters, 'all', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null);
+            $result = $this->documentModel->paginateForDepartment($department_id, $filters, 'all', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null, (int) $_SESSION['user_id']);
             $documents = $result['items'];
 
             $statusCounts = [
@@ -892,7 +955,7 @@ class Documents extends Controller
             $departmentId = (int) $_SESSION['department_id'];
             $filters = $this->getListFilters();
             $pagination = paginationRequest();
-            $result = $this->documentModel->paginateForDepartment($departmentId, $filters, 'outgoing', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null);
+            $result = $this->documentModel->paginateForDepartment($departmentId, $filters, 'outgoing', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null, (int) $_SESSION['user_id']);
             $documents = $result['items'];
 
             $data = [
@@ -918,7 +981,7 @@ class Documents extends Controller
             $departmentId = (int) $_SESSION['department_id'];
             $filters = $this->getListFilters();
             $pagination = paginationRequest();
-            $result = $this->documentModel->paginateForDepartment($departmentId, $filters, 'incoming', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null);
+            $result = $this->documentModel->paginateForDepartment($departmentId, $filters, 'incoming', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null, (int) $_SESSION['user_id']);
             $documents = $result['items'];
 
             $data = [
@@ -1077,6 +1140,10 @@ class Documents extends Controller
         try {
             $this->requireValidCsrfPost();
             $document = $this->findOwnedDraftOrFail($documentId);
+
+            if (!$this->departmentModel->canRelease((int) $_SESSION['department_id'])) {
+                throw new AuthorizationException('Units cannot release documents.');
+            }
 
             $this->documentModel->releaseDocument($documentId, $_SESSION['user_id'], $_SESSION['department_id']);
             $initialDepartmentIds = $this->getRouteDepartmentIdsByTypes($documentId, ['THRU']);
@@ -1732,8 +1799,18 @@ class Documents extends Controller
             foreach ($assignedToUserIds as $assignedToUserId) {
                 $assignee = $this->documentModel->findActiveStaffInDepartment($assignedToUserId, $deptId);
                 if (!$assignee) {
-                    throw new ValidationException('Select active staff members from your division.');
+                    throw new ValidationException($this->isUnitManager() ? 'Select active staff members from your unit.' : 'Select active staff members from your division.');
                 }
+            }
+
+            $parentAssignmentId = null;
+            if ($this->isUnitManager()) {
+                $unitAssignment = $this->documentModel->getCurrentUnitAssignmentForManager(
+                    $documentId,
+                    (int) $_SESSION['user_id'],
+                    $deptId
+                );
+                $parentAssignmentId = $unitAssignment ? (int) $unitAssignment['id'] : null;
             }
 
             $assignmentResult = $this->documentModel->assignDocumentInternallyToStaff(
@@ -1741,7 +1818,8 @@ class Documents extends Controller
                 $assignedToUserIds,
                 (int) $_SESSION['user_id'],
                 $deptId,
-                $instructions
+                $instructions,
+                $parentAssignmentId
             );
 
             foreach (($assignmentResult['assignees'] ?? []) as $assignee) {
@@ -1767,6 +1845,76 @@ class Documents extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'documents.delegateToStaff', 'document_id' => $documentId]);
             flash('error', 'We could not delegate that document right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function delegateToUnit($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $deptId = (int) $_SESSION['department_id'];
+            if (!$this->canCurrentManagerDelegateToUnit($documentId, $deptId)) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+
+            $assignedToUserIds = $_POST['assigned_to_user_ids'] ?? [];
+            if (!is_array($assignedToUserIds)) {
+                $assignedToUserIds = [$assignedToUserIds];
+            }
+            $assignedToUserIds = array_values(array_unique(array_filter(array_map('intval', $assignedToUserIds))));
+            $instructions = trim($_POST['unit_instruction'] ?? '');
+
+            if (empty($assignedToUserIds)) {
+                throw new ValidationException('Select at least one unit manager.');
+            }
+
+            foreach ($assignedToUserIds as $assignedToUserId) {
+                $assignee = $this->documentModel->findActiveManagerInChildUnit($assignedToUserId, $deptId);
+                if (!$assignee) {
+                    throw new ValidationException('Select active unit managers under your division.');
+                }
+            }
+
+            $assignmentResult = $this->documentModel->assignDocumentInternallyToUnitManagers(
+                $documentId,
+                $assignedToUserIds,
+                (int) $_SESSION['user_id'],
+                $deptId,
+                $instructions
+            );
+
+            foreach (($assignmentResult['assignees'] ?? []) as $assignee) {
+                $this->notificationModel->create(
+                    (int) $assignee['id'],
+                    'Document delegated to your unit',
+                    $document['prefix'] . ' was delegated to your unit.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', count($assignedToUserIds) === 1 ? 'Document delegated to unit manager successfully.' : 'Document delegated to unit managers successfully.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to delegate this document to a unit.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.delegateToUnit', 'document_id' => $documentId]);
+            flash('error', 'We could not delegate that document to a unit right now. Please try again.', 'error');
             redirect('/documents/show/' . $documentId, 303);
         }
     }
@@ -1838,7 +1986,7 @@ class Documents extends Controller
         try {
             $this->requireValidCsrfPost();
 
-            if ($this->isManager()) {
+            if ($this->isManager() && !$this->isUnitManager()) {
                 throw new AuthorizationException('Only assigned staff can receive internal assignments.');
             }
 
@@ -1948,6 +2096,11 @@ class Documents extends Controller
                 throw new NotFoundException('Document not found.');
             }
 
+            $assignment = $this->documentModel->getCurrentInternalAssignment($documentId, (int) $_SESSION['department_id']);
+            $parentUnitAssignment = !empty($assignment['parent_assignment_id'])
+                ? $this->documentModel->getAssignmentById((int) $assignment['parent_assignment_id'])
+                : null;
+
             $staffUserId = $this->documentModel->confirmInternalAssignment(
                 $documentId,
                 (int) $_SESSION['department_id'],
@@ -1963,6 +2116,15 @@ class Documents extends Controller
                 );
             }
 
+            if ($parentUnitAssignment && !empty($parentUnitAssignment['assigned_by_user_id'])) {
+                $this->notificationModel->create(
+                    (int) $parentUnitAssignment['assigned_by_user_id'],
+                    'Unit assignment completed',
+                    $document['prefix'] . ' unit assignment is ready for review.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
             flash('success', 'Internal assignment completion confirmed.', 'success');
             redirect('/documents/show/' . $documentId, 303);
         } catch (AuthorizationException $e) {
@@ -1974,6 +2136,107 @@ class Documents extends Controller
         } catch (Throwable $e) {
             reportException($e, ['action' => 'documents.confirmInternalAssignment', 'document_id' => $documentId]);
             flash('error', 'We could not confirm that assignment right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function returnUnitAssignment($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isDivisionManager()) {
+                throw new AuthorizationException('Only division managers can return unit assignments.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $remarks = trim($_POST['unit_return_remarks'] ?? '');
+            if ($remarks === '') {
+                throw new ValidationException('Enter return remarks for the unit manager.');
+            }
+
+            $unitManagerUserId = $this->documentModel->returnUnitAssignment(
+                $documentId,
+                (int) $_SESSION['department_id'],
+                (int) $_SESSION['user_id'],
+                $remarks
+            );
+
+            if ($unitManagerUserId > 0) {
+                $this->notificationModel->create(
+                    $unitManagerUserId,
+                    'Unit assignment returned',
+                    $document['prefix'] . ' unit assignment was returned for revision.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Unit assignment returned.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (ValidationException $e) {
+            flash('error', $e->getMessage(), 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to return this unit assignment.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.returnUnitAssignment', 'document_id' => $documentId]);
+            flash('error', 'We could not return that unit assignment right now. Please try again.', 'error');
+            redirect('/documents/show/' . $documentId, 303);
+        }
+    }
+
+    public function confirmUnitAssignment($id)
+    {
+        $documentId = (int) $id;
+
+        try {
+            $this->requireValidCsrfPost();
+
+            if (!$this->isDivisionManager()) {
+                throw new AuthorizationException('Only division managers can confirm unit assignments.');
+            }
+
+            $document = $this->documentModel->findById($documentId);
+            if (!$document) {
+                throw new NotFoundException('Document not found.');
+            }
+
+            $unitManagerUserId = $this->documentModel->confirmUnitAssignment(
+                $documentId,
+                (int) $_SESSION['department_id'],
+                (int) $_SESSION['user_id']
+            );
+
+            if ($unitManagerUserId > 0) {
+                $this->notificationModel->create(
+                    $unitManagerUserId,
+                    'Unit assignment confirmed',
+                    $document['prefix'] . ' unit assignment completion was confirmed.',
+                    '/documents/show/' . $documentId
+                );
+            }
+
+            flash('success', 'Unit assignment completion confirmed.', 'success');
+            redirect('/documents/show/' . $documentId, 303);
+        } catch (AuthorizationException $e) {
+            flash('error', 'You are not allowed to confirm this unit assignment.', 'error');
+            redirect('/documents', 303);
+        } catch (NotFoundException $e) {
+            flash('error', 'Document not found.', 'error');
+            redirect('/documents', 303);
+        } catch (Throwable $e) {
+            reportException($e, ['action' => 'documents.confirmUnitAssignment', 'document_id' => $documentId]);
+            flash('error', 'We could not confirm that unit assignment right now. Please try again.', 'error');
             redirect('/documents/show/' . $documentId, 303);
         }
     }
@@ -2024,28 +2287,42 @@ class Documents extends Controller
             $canReReleaseReturnedDocument = $canReplaceReturnedAttachment && $hasReplacementForOpenReturn;
             $returnIssueOptions = ['Incorrect attachment', 'Missing page', 'Wrong file', 'Unreadable file'];
             $internalAssignment = $this->documentModel->getCurrentInternalAssignment($documentId, $deptId);
+            $unitAssignment = $this->isDivisionManager()
+                ? $this->documentModel->getCurrentUnitAssignmentForDivision($documentId, $deptId)
+                : null;
             $canDelegateInternally = $this->canCurrentManagerDelegateInternally($documentId, $deptId)
+                && ($document['status'] ?? '') !== 'Returned';
+            $canDelegateToUnit = $this->canCurrentManagerDelegateToUnit($documentId, $deptId)
                 && ($document['status'] ?? '') !== 'Returned';
             $canManagerResolveDivisionDocument = $this->canCurrentManagerResolveDivisionDocument($documentId, $deptId)
                 && !$managerCompleted;
             $canManagerReturnDocument = $canManagerResolveDivisionDocument;
             $canManagerCompleteDocument = $canManagerResolveDivisionDocument;
+            $canReleaseOffice = $this->departmentModel->canRelease($deptId);
             $divisionStaff = $canDelegateInternally
                 ? $this->documentModel->getActiveStaffByDepartment($deptId)
                 : [];
+            $unitManagers = $canDelegateToUnit
+                ? $this->documentModel->getActiveManagersByChildUnits($deptId)
+                : [];
             $currentUserInternalAssignment = !$isManager
                 ? $this->documentModel->getCurrentInternalAssignmentForUser($documentId, (int) $_SESSION['user_id'])
-                : null;
-            $canReceiveInternalAssignment = !$isManager
+                : ($this->isUnitManager() ? $this->documentModel->getCurrentInternalAssignmentForUser($documentId, (int) $_SESSION['user_id']) : null);
+            $canReceiveInternalAssignment = (!$isManager || $this->isUnitManager())
                 && !empty($currentUserInternalAssignment)
                 && in_array($currentUserInternalAssignment['status'] ?? '', ['Pending', 'Returned'], true);
             $canCompleteInternalAssignment = !$isManager
                 && !empty($currentUserInternalAssignment)
-                && ($currentUserInternalAssignment['status'] ?? '') === 'Received';
+                && ($currentUserInternalAssignment['status'] ?? '') === 'Received'
+                && ($currentUserInternalAssignment['assignment_type'] ?? '') === 'INTERNAL';
             $canReturnInternalAssignment = $isManager
                 && !empty($internalAssignment)
                 && ($internalAssignment['status'] ?? '') === 'Completed';
             $canConfirmInternalAssignment = $canReturnInternalAssignment;
+            $canReturnUnitAssignment = $this->isDivisionManager()
+                && !empty($unitAssignment)
+                && ($unitAssignment['status'] ?? '') === 'Completed';
+            $canConfirmUnitAssignment = $canReturnUnitAssignment;
 
             if (!empty($document['reference_document_id']) && $this->documentModel->canDepartmentViewDocument((int) $document['reference_document_id'], $deptId)) {
                 $referencedDocument = $this->documentModel->findById((int) $document['reference_document_id']);
@@ -2087,6 +2364,14 @@ class Documents extends Controller
         try {
             [, $deptId] = $this->authorizeDocumentViewOrFail($documentId);
             $assignment = $this->documentModel->getCurrentInternalAssignment($documentId, $deptId);
+            $unitAssignment = null;
+
+            if (!$assignment && $this->isDivisionManager()) {
+                $unitAssignment = $this->documentModel->getCurrentUnitAssignmentForDivision($documentId, $deptId);
+                if ($unitAssignment && !empty($unitAssignment['completion_attachment'])) {
+                    $assignment = $unitAssignment;
+                }
+            }
 
             if (!$assignment || empty($assignment['completion_attachment'])) {
                 throw new NotFoundException('Completion attachment not found.');
@@ -2102,7 +2387,11 @@ class Documents extends Controller
                 ? basename(rawurldecode((string) $filename))
                 : (string) $assignment['completion_attachment'];
 
-            if ($filename !== null && !$this->documentModel->internalAssignmentLogHasAttachment($documentId, $deptId, $requestedAttachment)) {
+            if ($filename !== null && !$unitAssignment && !$this->documentModel->internalAssignmentLogHasAttachment($documentId, $deptId, $requestedAttachment)) {
+                throw new NotFoundException('Completion attachment not found.');
+            }
+
+            if ($filename !== null && $unitAssignment && basename((string) $unitAssignment['completion_attachment']) !== $requestedAttachment) {
                 throw new NotFoundException('Completion attachment not found.');
             }
 

@@ -3,8 +3,11 @@
 <?php
 $slip = $data['slip'] ?? [];
 $actions = $data['actions'] ?? [];
+$releasedToLabel = $data['released_to_label'] ?? ($slip['current_unit_name'] ?: ($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-')));
+$releasedToSubtext = $data['released_to_subtext'] ?? ($slip['assigned_staff_name'] ?? '');
 $currentDepartmentIdForSlip = (int) (($slip['current_department_id'] ?? 0) ?: ($slip['receiving_department_id'] ?? 0));
 $currentDivisionIdForSlip = (int) ($slip['current_division_id'] ?? 0);
+$currentUnitIdForSlip = (int) ($slip['current_unit_id'] ?? 0);
 $isDivisionDraftManager = !empty($actions['finalize_draft'])
     && (($_SESSION['role'] ?? '') === 'manager')
     && $currentDivisionIdForSlip > 0
@@ -28,8 +31,15 @@ $statusStyle = [
 
 <div class="page-hero compact">
     <div>
-        <h1 class="section-title">Action Slip Details</h1>
-        <div class="text-muted small mt-1"><?php echo htmlspecialchars($slip['slip_number'] ?? ''); ?></div>
+        <h1 class="section-title"><?php echo htmlspecialchars($slip['title'] ?: ($slip['slip_number'] ?? 'Action Slip Details')); ?></h1>
+        <div class="text-muted small mt-1">
+            <?php echo htmlspecialchars($slip['slip_number'] ?? ''); ?>
+            <?php if (!empty($slip['parent_slip_id']) && !empty($slip['parent_slip_number'])): ?>
+                <span class="mx-1">-</span>
+                <span>Child assignment of </span>
+                <a href="<?php echo URLROOT; ?>/actionSlips/show/<?php echo (int) $slip['parent_slip_id']; ?>"><?php echo htmlspecialchars($slip['parent_slip_number']); ?></a>
+            <?php endif; ?>
+        </div>
     </div>
     <a href="<?php echo URLROOT; ?>/actionSlips" class="btn btn-outline-secondary">Back to List</a>
 </div>
@@ -45,11 +55,20 @@ $statusStyle = [
                 <span class="badge-soft" style="<?php echo $statusStyle[$slip['status'] ?? ''] ?? 'background:#f1f5f9; color:#0f172a;'; ?>"><?php echo htmlspecialchars($slip['status'] ?? ''); ?></span>
             </div>
             <div class="row g-3 action-slip-detail-grid">
+                <div class="col-md-6 action-slip-detail-item action-slip-detail-wide"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Title</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($slip['title'] ?: ($slip['slip_number'] ?? '')); ?></div></div></div>
                 <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Tracking Number</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($slip['slip_number'] ?? ''); ?></div></div></div>
                 <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Date of Action Slip</div><div class="fw-bold mt-2"><?php echo !empty($slip['date_received']) ? htmlspecialchars(date('M d, Y', strtotime($slip['date_received']))) : '-'; ?></div></div></div>
+                <?php if (!empty($slip['parent_slip_id']) && !empty($slip['parent_slip_number'])): ?>
+                    <div class="col-md-3 action-slip-detail-item">
+                        <div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;">
+                            <div class="text-muted small text-uppercase fw-semibold">Original Slip</div>
+                            <div class="fw-bold mt-2"><a href="<?php echo URLROOT; ?>/actionSlips/show/<?php echo (int) $slip['parent_slip_id']; ?>"><?php echo htmlspecialchars($slip['parent_slip_number']); ?></a></div>
+                        </div>
+                    </div>
+                <?php endif; ?>
                 <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Deadline</div><div class="fw-bold mt-2"><?php echo !empty($slip['deadline']) ? htmlspecialchars(date('M d, Y', strtotime($slip['deadline']))) : '-'; ?></div></div></div>
                 <div class="col-md-3 action-slip-detail-item"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Urgent</div><div class="fw-bold mt-2"><?php echo !empty($slip['urgent']) ? 'Yes' : 'No'; ?></div></div></div>
-                <div class="col-md-6 action-slip-detail-item action-slip-detail-wide"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Released To</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-')); ?><?php echo !empty($slip['assigned_staff_name']) ? '<div class="small text-muted mt-1">' . htmlspecialchars($slip['assigned_staff_name']) . '</div>' : ''; ?></div></div></div>
+                <div class="col-md-6 action-slip-detail-item action-slip-detail-wide"><div class="app-card p-3 h-100 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;"><div class="text-muted small text-uppercase fw-semibold">Released To</div><div class="fw-bold mt-2"><?php echo htmlspecialchars($releasedToLabel); ?><?php echo !empty($releasedToSubtext) ? '<div class="small text-muted mt-1">' . htmlspecialchars($releasedToSubtext) . '</div>' : ''; ?></div></div></div>
                 <?php if (!empty($slip['remarks'])): ?>
                     <div class="col-12 action-slip-detail-item action-slip-detail-wide">
                         <div class="app-card p-3 action-slip-detail-tile" style="background:#f8fafc; box-shadow:none;">
@@ -90,6 +109,8 @@ $statusStyle = [
                         <div class="fw-bold mb-2">Finalize Draft</div>
                         <label for="draft_date_received" class="form-label small fw-semibold">Date of Action Slip</label>
                         <input type="date" id="draft_date_received" name="date_received" class="form-control mb-2" value="<?php echo htmlspecialchars($slip['date_received'] ?? ''); ?>" required>
+                        <label for="draft_title" class="form-label small fw-semibold">Title</label>
+                        <input type="text" id="draft_title" name="title" class="form-control mb-2" value="<?php echo htmlspecialchars($slip['title'] ?: ($slip['slip_number'] ?? '')); ?>" maxlength="255" required>
                         <div class="form-check mb-2">
                             <input type="checkbox" id="draft_urgent" name="urgent" value="1" class="form-check-input" <?php echo !empty($slip['urgent']) ? 'checked' : ''; ?>>
                             <label for="draft_urgent" class="form-check-label fw-semibold">Urgent</label>
@@ -282,10 +303,66 @@ $statusStyle = [
                     </form>
                 <?php endif; ?>
 
+                <?php if (!empty($actions['delegate_unit'])): ?>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/delegateUnit/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-unit-delegate-form>
+                        <?php echo csrfInput(); ?>
+                        <div class="fw-bold mb-2">Further Delegate to Unit</div>
+                        <label id="delegate_unit_label" class="visually-hidden">Select unit manager</label>
+                        <div class="route-multiselect mb-2" data-delegate-unit-multiselect data-route-required>
+                            <button
+                                type="button"
+                                class="form-select route-multiselect-toggle text-start"
+                                aria-labelledby="delegate_unit_label"
+                                aria-expanded="false"
+                                data-route-multiselect-toggle
+                            >
+                                <span data-route-multiselect-summary>Select unit manager</span>
+                            </button>
+                            <div class="route-multiselect-menu d-none" data-route-multiselect-menu>
+                                <input
+                                    type="search"
+                                    class="form-control route-search-input mb-2"
+                                    placeholder="Search unit managers"
+                                    aria-label="Search unit managers"
+                                    data-route-multiselect-search
+                                >
+                                <div class="route-checkbox-group route-multiselect-options" role="group" aria-labelledby="delegate_unit_label">
+                                    <?php foreach (($data['unit_managers'] ?? []) as $manager): ?>
+                                        <?php $managerId = (int) $manager['id']; ?>
+                                        <?php $managerName = trim(($manager['firstname'] ?? '') . ' ' . (!empty($manager['middle_initial']) ? $manager['middle_initial'] . '. ' : '') . ($manager['lastname'] ?? '')); ?>
+                                        <?php $unitName = trim((string) ($manager['unit_name'] ?? 'Unit')); ?>
+                                        <label class="route-checkbox-item" for="delegate_unit_<?php echo $managerId; ?>" data-route-label="<?php echo htmlspecialchars(strtolower($unitName . ' ' . $managerName), ENT_QUOTES, 'UTF-8'); ?>">
+                                            <input
+                                                class="form-check-input"
+                                                type="checkbox"
+                                                id="delegate_unit_<?php echo $managerId; ?>"
+                                                name="unit_manager_ids[]"
+                                                value="<?php echo $managerId; ?>"
+                                            >
+                                            <span><?php echo htmlspecialchars($unitName . ' - ' . $managerName); ?></span>
+                                        </label>
+                                    <?php endforeach; ?>
+                                    <div class="route-empty-state d-none" data-route-empty>No unit managers match your search.</div>
+                                </div>
+                            </div>
+                            <div class="invalid-feedback" data-route-required-error>Select at least one unit manager.</div>
+                        </div>
+                        <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Instructions or remarks"></textarea>
+                        <button type="submit" class="btn btn-primary w-100">Delegate to Unit</button>
+                    </form>
+                <?php endif; ?>
+
+                <?php if (!empty($actions['receive_unit'])): ?>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/receiveUnit/<?php echo (int) $slip['id']; ?>" method="POST">
+                        <?php echo csrfInput(); ?>
+                        <button type="submit" class="btn btn-primary w-100">Receive</button>
+                    </form>
+                <?php endif; ?>
+
                 <?php if (!empty($actions['delegate_staff'])): ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/delegateStaff/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-staff-delegate-form>
                         <?php echo csrfInput(); ?>
-                        <div class="fw-bold mb-2">Further Delegate to Staff</div>
+                        <div class="fw-bold mb-2"><?php echo !empty($actions['delegate_staff_to_unit_staff']) ? 'Further Delegate to Unit Staff' : 'Further Delegate to Staff'; ?></div>
                         <label id="delegate_staff_label" class="visually-hidden">Select staff</label>
                         <div class="route-multiselect mb-2" data-delegate-staff-multiselect data-route-required>
                             <button
@@ -326,7 +403,7 @@ $statusStyle = [
                             <div class="invalid-feedback" data-route-required-error>Select at least one staff member.</div>
                         </div>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Instructions or remarks"></textarea>
-                        <button type="submit" class="btn btn-outline-dark w-100">Further Delegate to Staff</button>
+                        <button type="submit" class="btn btn-outline-dark w-100"><?php echo !empty($actions['delegate_staff_to_unit_staff']) ? 'Further Delegate to Unit Staff' : 'Further Delegate to Staff'; ?></button>
                     </form>
                 <?php endif; ?>
 
@@ -355,6 +432,74 @@ $statusStyle = [
                     </form>
                 <?php endif; ?>
 
+                <?php if (!empty($actions['confirm_unit']) && !empty($data['completed_staff_assignments'])): ?>
+                    <?php foreach ($data['completed_staff_assignments'] as $completedStaff): ?>
+                        <?php $completedStaffName = trim((string) ($completedStaff['staff_name'] ?? 'Staff')); ?>
+                        <div class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                            <div class="fw-bold mb-2">Staff Completion</div>
+                            <div class="small text-muted mb-2">For <?php echo htmlspecialchars($completedStaffName); ?></div>
+                            <form action="<?php echo URLROOT; ?>/actionSlips/confirmUnit/<?php echo (int) $slip['id']; ?>" method="POST" class="mb-2">
+                                <?php echo csrfInput(); ?>
+                                <input type="hidden" name="assignment_id" value="<?php echo (int) $completedStaff['id']; ?>">
+                                <button type="submit" class="btn btn-success w-100">Confirm Completion for <?php echo htmlspecialchars($completedStaffName); ?></button>
+                            </form>
+                            <form action="<?php echo URLROOT; ?>/actionSlips/returnSlip/<?php echo (int) $slip['id']; ?>" method="POST">
+                                <?php echo csrfInput(); ?>
+                                <input type="hidden" name="assignment_id" value="<?php echo (int) $completedStaff['id']; ?>">
+                                <select name="return_reason" class="form-select mb-2" required>
+                                    <option value="">Select reason</option>
+                                    <option value="Did not pass standards">Did not pass standards</option>
+                                    <option value="Change of instruction">Change of instruction</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                                <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Reason and revised instruction for <?php echo htmlspecialchars($completedStaffName); ?>" required></textarea>
+                                <button type="submit" class="btn btn-outline-danger w-100">Return to <?php echo htmlspecialchars($completedStaffName); ?></button>
+                            </form>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+
+                <?php if (!empty($actions['confirm_unit_for_division']) && !empty($data['completed_unit_assignments'])): ?>
+                    <?php foreach ($data['completed_unit_assignments'] as $completedUnit): ?>
+                        <?php $completedUnitName = trim((string) ($completedUnit['unit_name'] ?? 'Unit')); ?>
+                        <?php $completedUnitAssignee = trim((string) ($completedUnit['assignee_name'] ?? '')); ?>
+                        <div class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                            <div class="fw-bold mb-2">Unit Completion</div>
+                            <div class="small text-muted mb-2">
+                                For <?php echo htmlspecialchars($completedUnitName); ?>
+                                <?php if ($completedUnitAssignee !== ''): ?>
+                                    <div>Submitted by <?php echo htmlspecialchars($completedUnitAssignee); ?></div>
+                                <?php endif; ?>
+                            </div>
+                            <form action="<?php echo URLROOT; ?>/actionSlips/confirmDivision/<?php echo (int) $slip['id']; ?>" method="POST" class="mb-2">
+                                <?php echo csrfInput(); ?>
+                                <input type="hidden" name="assignment_id" value="<?php echo (int) $completedUnit['id']; ?>">
+                                <button type="submit" class="btn btn-success w-100">Confirm Completion for <?php echo htmlspecialchars($completedUnitName); ?></button>
+                            </form>
+                            <form action="<?php echo URLROOT; ?>/actionSlips/returnSlip/<?php echo (int) $slip['id']; ?>" method="POST">
+                                <?php echo csrfInput(); ?>
+                                <input type="hidden" name="assignment_id" value="<?php echo (int) $completedUnit['id']; ?>">
+                                <select name="return_reason" class="form-select mb-2" required>
+                                    <option value="">Select reason</option>
+                                    <option value="Did not pass standards">Did not pass standards</option>
+                                    <option value="Change of instruction">Change of instruction</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                                <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Reason and revised instruction for <?php echo htmlspecialchars($completedUnitName); ?>" required></textarea>
+                                <button type="submit" class="btn btn-outline-danger w-100">Return to <?php echo htmlspecialchars($completedUnitName); ?></button>
+                            </form>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+
+                <?php if (!empty($actions['complete_unit'])): ?>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/completeUnit/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                        <?php echo csrfInput(); ?>
+                        <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Completion remarks"></textarea>
+                        <button type="submit" class="btn btn-success w-100">Mark Unit Task Completed</button>
+                    </form>
+                <?php endif; ?>
+
                 <?php if (!empty($actions['complete_division'])): ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/completeDivision/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                         <?php echo csrfInput(); ?>
@@ -378,11 +523,11 @@ $statusStyle = [
                     </form>
                 <?php endif; ?>
 
-                <?php if (!empty($actions['return'])): ?>
+                <?php if (!empty($actions['return']) && (empty($actions['return_staff_completion']) || empty($data['completed_staff_assignments'])) && (empty($actions['return_unit_completion']) || empty($data['completed_unit_assignments']))): ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/returnSlip/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#fff7ed; border:1px solid #fed7aa; box-shadow:none;">
                         <?php echo csrfInput(); ?>
-                        <div class="fw-bold mb-2"><?php echo !empty($actions['return_staff_completion']) ? 'Return to Staff' : 'Return'; ?></div>
-                        <?php if (!empty($actions['return_staff_completion'])): ?>
+                        <div class="fw-bold mb-2"><?php echo !empty($actions['return_staff_completion']) ? 'Return to Staff' : (!empty($actions['return_unit_completion']) ? 'Return to Unit' : 'Return'); ?></div>
+                        <?php if (!empty($actions['return_staff_completion']) || !empty($actions['return_unit_completion'])): ?>
                             <select name="return_reason" class="form-select mb-2" required>
                                 <option value="">Select reason</option>
                                 <option value="Did not pass standards">Did not pass standards</option>
@@ -391,7 +536,7 @@ $statusStyle = [
                             </select>
                         <?php endif; ?>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Reason and revised instruction" required></textarea>
-                        <button type="submit" class="btn btn-outline-danger w-100"><?php echo !empty($actions['return_staff_completion']) ? 'Return to Staff' : 'Return'; ?></button>
+                        <button type="submit" class="btn btn-outline-danger w-100"><?php echo !empty($actions['return_staff_completion']) ? 'Return to Staff' : (!empty($actions['return_unit_completion']) ? 'Return to Unit' : 'Return'); ?></button>
                     </form>
                 <?php endif; ?>
 
@@ -445,10 +590,17 @@ $statusStyle = [
         position: relative;
         z-index: 30;
     }
+    [data-unit-delegate-form] {
+        position: relative;
+        z-index: 30;
+    }
     [data-draft-finalize-form]:has(.route-multiselect-menu:not(.d-none)) {
         z-index: 1400;
     }
     [data-staff-delegate-form]:has(.route-multiselect-menu:not(.d-none)) {
+        z-index: 1400;
+    }
+    [data-unit-delegate-form]:has(.route-multiselect-menu:not(.d-none)) {
         z-index: 1400;
     }
     .route-multiselect-toggle {
@@ -543,6 +695,7 @@ $statusStyle = [
 
     const draftForm = document.querySelector('[data-draft-finalize-form]');
     const delegateStaffForm = document.querySelector('[data-staff-delegate-form]');
+    const delegateUnitForm = document.querySelector('[data-unit-delegate-form]');
 
     function createRouteMultiselect(container, emptySummary, pluralSummary) {
         if (!container) {
@@ -723,6 +876,21 @@ $statusStyle = [
             if (delegateStaffPicker && !delegateStaffPicker.isValid()) {
                 event.preventDefault();
                 delegateStaffPicker.showRequiredError();
+            }
+        });
+    }
+
+    if (delegateUnitForm) {
+        const delegateUnitPicker = createRouteMultiselect(
+            delegateUnitForm.querySelector('[data-delegate-unit-multiselect]'),
+            'Select unit manager',
+            'unit managers selected'
+        );
+
+        delegateUnitForm.addEventListener('submit', (event) => {
+            if (delegateUnitPicker && !delegateUnitPicker.isValid()) {
+                event.preventDefault();
+                delegateUnitPicker.showRequiredError();
             }
         });
     }

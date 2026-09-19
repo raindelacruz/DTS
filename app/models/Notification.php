@@ -145,6 +145,7 @@ class Notification
             SELECT *
             FROM notifications
             WHERE user_id = :user_id
+            AND is_read = 0
             ORDER BY created_at DESC, id DESC
             LIMIT :limit
         ");

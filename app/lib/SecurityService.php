@@ -31,15 +31,15 @@ class SecurityService
     {
         try {
             $hash = hash('sha256', strtolower(trim($identifier)));
-            foreach ([[$hash, $ipAddress], [$hash, '*'], [hash('sha256', 'ip-bucket'), $ipAddress]] as [$bucketHash, $bucketIp]) {
-                $this->recordFailureBucket($bucketHash, $bucketIp);
-            }
+            $this->recordFailureBucket($hash, $ipAddress, LOGIN_MAX_ATTEMPTS);
+            $this->recordFailureBucket($hash, '*', LOGIN_MAX_ATTEMPTS);
+            $this->recordFailureBucket(hash('sha256', 'ip-bucket'), $ipAddress, LOGIN_IP_MAX_ATTEMPTS);
         } catch (Throwable $e) {
             appLog('error', 'Login failure tracking failed', ['message' => $e->getMessage()]);
         }
     }
 
-    private function recordFailureBucket($hash, $ipAddress)
+    private function recordFailureBucket($hash, $ipAddress, $maxAttempts)
     {
         $this->db->query("
             INSERT INTO login_attempts (identifier_hash, ip_address, failed_attempts, first_failed_at, last_failed_at, locked_until)
@@ -54,7 +54,7 @@ class SecurityService
         $this->db->bind(':ip_address', $ipAddress);
         $this->db->bind(':window', LOGIN_LOCKOUT_SECONDS);
         $this->db->bind(':window2', LOGIN_LOCKOUT_SECONDS);
-        $this->db->bind(':max_attempts', LOGIN_MAX_ATTEMPTS);
+        $this->db->bind(':max_attempts', (int) $maxAttempts);
         $this->db->bind(':lockout', LOGIN_LOCKOUT_SECONDS);
         $this->db->execute();
     }

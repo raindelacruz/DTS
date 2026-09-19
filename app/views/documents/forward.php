@@ -32,11 +32,6 @@ usort($divisionDepartments, $sortDivisionFirst);
     <div><h1 class="section-title" style="font-size:1.7rem;">Forward Document</h1></div>
 </div>
 
-<div class="instruction-card">
-    <h3>Quick Guide</h3>
-    <p>Select one or more valid target departments, use the search box to find offices faster, then give a clear instruction and deadline. Mark the item urgent only when the receiving office needs immediate attention.</p>
-</div>
-
 <div class="app-card p-4 p-lg-5">
     <?php if (!empty($formMessage)): ?>
         <div class="alert alert-danger mb-4"><?php echo htmlspecialchars($formMessage); ?></div>
