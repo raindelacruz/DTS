@@ -117,6 +117,7 @@ class Auth extends Controller
     public function login()
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            observeSecurityRequest('login', $_POST['id_number'] ?? '');
             $values = [
                 'id_number' => trim($_POST['id_number'] ?? '')
             ];
@@ -143,7 +144,7 @@ class Auth extends Controller
 
                 $phase = 'throttle';
                 $ipAddress = clientIpAddress();
-                if ($this->isLoginBlocked($values['id_number'], $ipAddress)) {
+                if (!AuthenticationGuard::enabled() && $this->isLoginBlocked($values['id_number'], $ipAddress)) {
                     securityAudit('login_blocked', null, null, ['identifier_hash' => hash('sha256', strtolower($values['id_number']))]);
                     throw new ValidationException('Too many sign-in attempts. Please try again later.', [
                         '_global' => 'Too many sign-in attempts. Please try again later.'
@@ -151,7 +152,19 @@ class Auth extends Controller
                 }
 
                 $phase = 'credential_lookup';
-                $user = $this->users()->login($values['id_number'], $password);
+                if (AuthenticationGuard::enabled()) {
+                    $result = AuthenticationGuard::configured()->check('login', $values['id_number'], function () use ($values, $password) {
+                        $candidate = $this->users()->login($values['id_number'], $password);
+                        return $candidate && ($candidate->status ?? '') === 'active' ? $candidate : false;
+                    });
+                    if ($result['status'] === 'limited') {
+                        header('Retry-After: ' . $result['retry']);
+                        throw new ValidationException('Too many sign-in attempts. Try again in ' . $result['retry'] . ' seconds. Contact your system administrator if you need help.');
+                    }
+                    $user = $result['value'] ?? false;
+                } else {
+                    $user = $this->users()->login($values['id_number'], $password);
+                }
 
                 if (!$user) {
                     $this->recordLoginFailure($values['id_number'], $ipAddress);
@@ -175,7 +188,9 @@ class Auth extends Controller
 
                 $phase = 'post_login_updates';
                 $this->users()->markLoginSuccessful((int) $user->id);
-                securityAudit('login_succeeded', (int) $user->id, (int) $user->id);
+                // Preserve the legacy event for existing reports, with an explicit stage.
+                securityAudit('login_succeeded', (int) $user->id, (int) $user->id, ['stage' => 'password_only']);
+                securityAudit('password_accepted', (int) $user->id, (int) $user->id);
 
                 $phase = 'post_login_redirect';
                 if (($user->role ?? '') === 'admin' && empty($user->mfa_enabled)) {
@@ -185,6 +200,7 @@ class Auth extends Controller
                     if ($this->hasTrustedMfaDevice($user)) {
                         $_SESSION['mfa_verified'] = true;
                         securityAudit('mfa_trusted_device_used', (int) $user->id, (int) $user->id);
+                        securityAudit('authentication_completed', (int) $user->id, (int) $user->id, ['method' => 'trusted_device']);
                         flash('auth_success', 'Welcome back.', 'success');
                         redirect('/dashboard', 303);
                     }
@@ -193,10 +209,12 @@ class Auth extends Controller
                 }
 
                 $_SESSION['mfa_verified'] = true;
+                securityAudit('authentication_completed', (int) $user->id, (int) $user->id, ['method' => 'password_only']);
                 flash('auth_success', 'Welcome back.', 'success');
                 redirect('/dashboard', 303);
             } catch (ValidationException $e) {
                 http_response_code(422);
+                securityAudit('security_request_rejected', null, null, ['action' => 'login', 'reason' => 'validation']);
                 $errors = $e->getErrors();
                 $message = $errors['_global'] ?? $e->getMessage();
                 $this->renderLogin($values, $errors, $message);
@@ -231,19 +249,20 @@ class Auth extends Controller
     public function register()
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            observeSecurityRequest('registration', $_POST['email'] ?? '');
             $values = [
-                'id_number' => trim($_POST['id_number'] ?? ''),
-                'firstname' => trim($_POST['firstname'] ?? ''),
-                'lastname' => trim($_POST['lastname'] ?? ''),
-                'email' => strtolower(trim($_POST['email'] ?? '')),
-                'department_id' => (string) ((int) ($_POST['department_id'] ?? 0))
+                'id_number' => is_string($_POST['id_number'] ?? '') ? trim($_POST['id_number'] ?? '') : '',
+                'firstname' => is_string($_POST['firstname'] ?? '') ? trim($_POST['firstname'] ?? '') : '',
+                'lastname' => is_string($_POST['lastname'] ?? '') ? trim($_POST['lastname'] ?? '') : '',
+                'email' => is_string($_POST['email'] ?? '') ? strtolower(trim($_POST['email'] ?? '')) : '',
+                'department_id' => (string) (is_scalar($_POST['department_id'] ?? 0) ? (int) ($_POST['department_id'] ?? 0) : 0)
             ];
 
             try {
                 validateCsrfOrFail();
 
-                $password = trim($_POST['password'] ?? '');
-                $confirmPassword = trim($_POST['confirm_password'] ?? '');
+                $password = is_string($_POST['password'] ?? '') ? trim($_POST['password'] ?? '') : '';
+                $confirmPassword = is_string($_POST['confirm_password'] ?? '') ? trim($_POST['confirm_password'] ?? '') : '';
                 $errors = [];
 
                 if ($values['id_number'] === '') {
@@ -275,6 +294,23 @@ class Auth extends Controller
                     $errors['confirm_password'] = 'Please confirm your password.';
                 } elseif ($password !== $confirmPassword) {
                     $errors['confirm_password'] = 'Passwords do not match.';
+                }
+
+                if (RegistrationProtection::enabled()) {
+                    if (!RegistrationProtection::validId($values['id_number'])) { $errors['id_number'] = 'Check the employee ID supplied with your invitation.'; }
+                    if (strlen($values['email']) > 150) { $errors['email'] = 'The email address is too long.'; }
+                    if (!empty($errors)) { throw new ValidationException('Please correct the highlighted fields.', $errors); }
+                    $code = is_string($_POST['invitation_code'] ?? '') ? trim($_POST['invitation_code'] ?? '') : '';
+                    // Never store invitation codes or passwords in form state or exception logs.
+                    $result = RegistrationProtection::configured()->register($values, $password, substr($code, 0, 256));
+                    if ($result['status'] === 'limited') {
+                        throw new ValidationException('Too many registration submissions. Please try again later or contact your system administrator.');
+                    }
+                    if ($result['status'] === 'invalid') {
+                        throw new ValidationException('Registration could not be accepted. Check your invitation and employee details, or contact your system administrator.');
+                    }
+                    flash('auth_success', 'Your registration has been received. The account remains inactive until administrator review. If you already submitted it, contact your system administrator for its status.', 'success');
+                    redirect('/auth/login', 303);
                 }
 
                 if ($values['id_number'] !== '' && $this->users()->findByIdNumber($values['id_number'])) {
@@ -313,9 +349,10 @@ class Auth extends Controller
                 redirect('/auth/login', 303);
             } catch (ValidationException $e) {
                 storeFormState('auth_register', $values, $e->getErrors(), $e->getMessage());
+                securityAudit('security_request_rejected', null, null, ['action' => 'registration', 'reason' => 'validation']);
                 redirect('/auth/register', 303);
             } catch (Throwable $e) {
-                reportException($e, ['action' => 'auth.register', 'id_number' => $values['id_number'], 'email' => $values['email']]);
+                appLog('error', 'Registration unavailable', ['exception_class' => get_class($e)]);
                 storeFormState('auth_register', $values, [], 'We could not complete your registration right now. Please try again.');
                 redirect('/auth/register', 303);
             }
@@ -327,7 +364,8 @@ class Auth extends Controller
             'values' => $state['values'],
             'errors' => $state['errors'],
             'message' => $state['message'],
-            'departments' => $this->departments()->getAll()
+            'departments' => $this->departments()->getAll(),
+            'invitation_required' => RegistrationProtection::enabled()
         ];
 
         $this->view('auth/register', $data);
@@ -362,6 +400,7 @@ class Auth extends Controller
     private function beginAuthenticatedSession($user)
     {
         session_regenerate_id(true);
+        unset($_SESSION['mfa_verified'], $_SESSION['mfa_challenge'], $_SESSION['mfa_setup_secret'], $_SESSION['admin_challenges'], $_SESSION['admin_emergency_logged']);
         expireCookieOnLegacyPaths(session_name());
         $_SESSION['user_id'] = (int) $user->id;
         $_SESSION['department_id'] = (int) $user->department_id;
@@ -371,6 +410,39 @@ class Auth extends Controller
         $_SESSION['session_version'] = (int) ($user->session_version ?? 0);
         $_SESSION['authenticated_at'] = time();
         $_SESSION['last_activity_at'] = time();
+        if (AuthenticationGuard::enabled()) { AuthenticationGuard::startChallenge($_SESSION, time()); }
+    }
+
+    private function requireMfaChallenge($user)
+    {
+        if (AuthenticationGuard::enabled() && !empty($_SESSION['mfa_verified'])) { redirect('/dashboard', 303); }
+        if (AuthenticationGuard::enabled() && !AuthenticationGuard::challengeValid($_SESSION, (int) $user->id,
+            (int) ($user->session_version ?? 0), time())) {
+            clearAuthenticatedSession();
+            flash('auth_error', 'Verification expired or too many codes were submitted. Please sign in again.', 'error');
+            redirect('/auth/login', 303);
+        }
+    }
+
+    private function verifyMfaCode($user, $secret)
+    {
+        if (!AuthenticationGuard::enabled()) { return TotpService::verify($secret, $_POST['code'] ?? ''); }
+        $result = AuthenticationGuard::configured()->check('mfa', 'user:' . (int) $user->id,
+            static function ($now) use ($secret) {
+                return $secret === '' ? false : TotpService::matchingStep($secret, $_POST['code'] ?? '', $now);
+            }, $secret);
+        if ($result['status'] !== 'limited') { $_SESSION['mfa_challenge']['attempts']++; }
+        if ($result['status'] !== 'accepted') {
+            securityAudit('mfa_failed', (int) $user->id, (int) $user->id, ['reason' => $result['status']]);
+            if ($_SESSION['mfa_challenge']['attempts'] >= 5) {
+                clearAuthenticatedSession();
+                flash('auth_error', 'Too many verification attempts. Sign in again after five minutes or contact your system administrator.', 'error');
+                redirect('/auth/login', 303);
+            }
+            header('Retry-After: ' . $result['retry']);
+            throw new ValidationException('Verification unsuccessful. Try again in ' . $result['retry'] . ' seconds. Contact your system administrator if you need help.');
+        }
+        return true;
     }
 
     private function trustedMfaCookieOptions($expires)
@@ -509,7 +581,8 @@ class Auth extends Controller
             $message = implode("\r\n", $lines) . "\r\n\r\n" . str_replace("\n.", "\n..", str_replace(["\r\n", "\r"], "\n", $body));
             fwrite($socket, str_replace("\n", "\r\n", $message) . "\r\n.\r\n");
             $this->smtpExpect($socket, [250]);
-            $this->smtpCommand($socket, 'QUIT', [221]);
+            // DATA acceptance is the delivery milestone; QUIT failure cannot undo it.
+            try { $this->smtpCommand($socket, 'QUIT', [221]); } catch (Throwable $e) {}
             fclose($socket);
             return true;
         } catch (Throwable $e) {
@@ -558,6 +631,7 @@ class Auth extends Controller
             clearAuthenticatedSession();
             redirect('/auth/login', 303);
         }
+        $this->requireMfaChallenge($user);
         if (!empty($user->mfa_enabled)) {
             redirect('/dashboard', 303);
         }
@@ -569,7 +643,7 @@ class Auth extends Controller
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             try {
                 validateCsrfOrFail();
-                if (!TotpService::verify($secret, $_POST['code'] ?? '')) {
+                if (!$this->verifyMfaCode($user, $secret)) {
                     throw new ValidationException('The verification code is invalid.');
                 }
                 $this->users()->configureMfa((int) $user->id, encryptSensitiveValue($secret));
@@ -581,6 +655,7 @@ class Auth extends Controller
                 }
                 unset($_SESSION['mfa_setup_secret']);
                 securityAudit('mfa_enabled', (int) $user->id, (int) $user->id);
+                securityAudit('authentication_completed', (int) $user->id, (int) $user->id, ['method' => 'mfa_enrollment']);
                 redirect('/dashboard', 303);
             } catch (ValidationException $e) {
                 $error = $e->getMessage();
@@ -602,30 +677,41 @@ class Auth extends Controller
 
     public function mfa()
     {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            $userId = !empty($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+            observeSecurityRequest('mfa', $userId ? 'user:' . $userId : '', $userId);
+        }
         $user = !empty($_SESSION['user_id']) ? $this->users()->findById((int) $_SESSION['user_id']) : null;
         if (!$user || ($user->status ?? '') !== 'active' || empty($user->mfa_enabled)) {
+            if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+                securityAudit('security_request_rejected', null, null, ['action' => 'mfa', 'reason' => 'authentication_required']);
+            }
             clearAuthenticatedSession();
             redirect('/auth/login', 303);
         }
+        $this->requireMfaChallenge($user);
         $rememberDeviceDays = (int) ceil(MFA_REMEMBER_DEVICE_SECONDS / 86400);
         $error = '';
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             try {
                 validateCsrfOrFail();
                 $secret = decryptSensitiveValue($user->mfa_secret ?? '');
-                if ($secret === '' || !TotpService::verify($secret, $_POST['code'] ?? '')) {
+                if (!$this->verifyMfaCode($user, $secret)) {
                     securityAudit('mfa_failed', (int) $user->id, (int) $user->id);
                     throw new ValidationException('The verification code is invalid.');
                 }
                 session_regenerate_id(true);
                 $_SESSION['mfa_verified'] = true;
+                unset($_SESSION['mfa_challenge']);
                 $_SESSION['last_activity_at'] = time();
                 if (!empty($_POST['remember_device'])) {
                     $this->rememberMfaDevice($user);
                 }
                 securityAudit('mfa_succeeded', (int) $user->id, (int) $user->id);
+                securityAudit('authentication_completed', (int) $user->id, (int) $user->id, ['method' => 'totp']);
                 redirect('/dashboard', 303);
             } catch (ValidationException $e) {
+                securityAudit('security_request_rejected', null, (int) $user->id, ['action' => 'mfa', 'reason' => 'validation']);
                 $error = $e->getMessage();
             } catch (Throwable $e) {
                 reportException($e, ['action' => 'auth.mfa', 'user_id' => (int) $user->id]);
@@ -637,10 +723,34 @@ class Auth extends Controller
 
     public function forgotPassword()
     {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            observeSecurityRequest('password_reset', $_POST['email'] ?? '');
+        }
         $message = PASSWORD_RESET_ENABLED ? '' : 'Forgot password is temporarily disabled.';
         $developmentResetUrl = '';
+        if (!PASSWORD_RESET_ENABLED && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            securityAudit('security_request_rejected', null, null, ['action' => 'password_reset', 'reason' => 'feature_disabled']);
+        }
         if (PASSWORD_RESET_ENABLED && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-            validateCsrfOrFail();
+            try {
+                validateCsrfOrFail();
+            } catch (ValidationException $e) {
+                securityAudit('security_request_rejected', null, null, ['action' => 'password_reset', 'reason' => 'csrf']);
+                throw $e;
+            }
+            if (PasswordResetProtection::enabled()) {
+                $submitted = $_POST['email'] ?? '';
+                try {
+                    $outcome = PasswordResetProtection::configured()->request(is_string($submitted) ? $submitted : '', 'encryptSensitiveValue');
+                    securityAudit('password_reset_guard_processed', null, null, ['outcome' => $outcome]);
+                } catch (Throwable $e) {
+                    appLog('error', 'Password reset protection unavailable', ['exception_class' => get_class($e)]);
+                    securityAudit('password_reset_guard_unavailable');
+                }
+                $message = 'If the address belongs to an active account and the request is eligible, reset instructions will be emailed. Allow time for delivery and wait at least one minute before trying again. If you still need help, contact your system administrator.';
+                require APPROOT . '/views/auth/forgot_password.php';
+                return;
+            }
             $email = strtolower(trim($_POST['email'] ?? ''));
             $user = filter_var($email, FILTER_VALIDATE_EMAIL) ? $this->users()->findByEmail($email) : null;
             if ($user && ($user->status ?? '') === 'active') {
@@ -660,6 +770,8 @@ class Auth extends Controller
                     'mail_accepted' => (bool) $delivered,
                     'transport' => SMTP_HOST !== '' ? 'smtp' : 'mail'
                 ]);
+            } else {
+                securityAudit('security_request_processed', null, null, ['action' => 'password_reset', 'delivery' => 'not_attempted']);
             }
             $message = 'If the address belongs to an active account, password-reset instructions have been sent.';
         }
@@ -668,7 +780,15 @@ class Auth extends Controller
 
     public function resetPassword($token = '')
     {
-        $reset = $this->security()->findValidPasswordReset((string) $token);
+        $reset = false;
+        try {
+            $reset = $this->security()->findValidPasswordReset((string) $token);
+        } catch (Throwable $e) {
+            appLog('error', 'Password reset lookup unavailable', ['exception_class' => get_class($e)]);
+            $error = 'Your password could not be reset right now. Please try again later or contact your system administrator.';
+            require APPROOT . '/views/auth/reset_password.php';
+            return;
+        }
         $error = '';
         if (!$reset) {
             $error = 'This password-reset link is invalid or expired.';
@@ -684,15 +804,34 @@ class Auth extends Controller
                 if (!hash_equals($password, $confirmation)) {
                     throw new ValidationException('Password confirmation does not match.');
                 }
-                $this->users()->updatePassword((int) $reset->user_id, $password);
-                $this->security()->consumePasswordReset((int) $reset->id);
+                if (PasswordResetProtection::enabled()) {
+                    $completedUser = PasswordResetProtection::configured()->complete((string) $token, $password);
+                    if ($completedUser === null) { throw new ValidationException('This password-reset link is invalid or expired.'); }
+                } else {
+                    $this->users()->updatePassword((int) $reset->user_id, $password);
+                    $this->security()->consumePasswordReset((int) $reset->id);
+                }
                 securityAudit('password_reset_completed', (int) $reset->user_id, (int) $reset->user_id);
                 flash('auth_success', 'Your password has been reset. You can now sign in.', 'success');
                 redirect('/auth/login', 303);
             } catch (ValidationException $e) {
                 $error = $e->getMessage();
+            } catch (Throwable $e) {
+                appLog('error', 'Password reset completion unavailable', ['exception_class' => get_class($e)]);
+                $error = 'Your password could not be reset right now. Please try again later or contact your system administrator.';
             }
         }
         require_once APPROOT . '/views/auth/reset_password.php';
+    }
+
+    public function deliverQueuedResetMail()
+    {
+        if (PHP_SAPI !== 'cli') { http_response_code(404); return; }
+        if (!PASSWORD_RESET_ENABLED || !PasswordResetProtection::enabled()) { throw new RuntimeException('Protected password reset delivery is disabled.'); }
+        $status = PasswordResetProtection::configured()->deliverOne('decryptSensitiveValue', function ($email, $token) {
+            return $this->sendPasswordResetInstructions($email, buildUrl('/auth/resetPassword/' . rawurlencode($token)));
+        });
+        if ($status !== 'empty') { securityAudit('password_reset_mail_processed', null, null, ['delivery' => $status]); }
+        return $status;
     }
 }

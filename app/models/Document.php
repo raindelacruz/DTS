@@ -438,7 +438,7 @@ class Document
 
     public function getNextPrefix($departmentId)
     {
-        $departmentId = (int) $departmentId;
+        $departmentId = $this->resolveDocumentPrefixDepartmentId((int) $departmentId);
 
         $stmt = $this->db->prepare("SELECT code FROM departments WHERE id = :department_id");
         $stmt->execute(['department_id' => $departmentId]);
@@ -469,6 +469,47 @@ class Document
         $formattedNumber = str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
 
         return "{$department['code']}-{$year}-{$month}-{$formattedNumber}";
+    }
+
+    private function resolveDocumentPrefixDepartmentId($departmentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT id, parent_id, office_level
+            FROM departments
+            WHERE id = :department_id
+            LIMIT 1
+        ");
+        $stmt->execute(['department_id' => (int) $departmentId]);
+        $department = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$department) {
+            throw new Exception('Invalid Department.');
+        }
+
+        if (($department['office_level'] ?? '') !== 'unit') {
+            return (int) $department['id'];
+        }
+
+        $parentId = (int) ($department['parent_id'] ?? 0);
+        if ($parentId <= 0) {
+            throw new Exception('Invalid Department.');
+        }
+
+        $parentStmt = $this->db->prepare("
+            SELECT id
+            FROM departments
+            WHERE id = :department_id
+            AND office_level IN ('department', 'division')
+            LIMIT 1
+        ");
+        $parentStmt->execute(['department_id' => $parentId]);
+        $parent = $parentStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$parent) {
+            throw new Exception('Invalid Department.');
+        }
+
+        return (int) $parent['id'];
     }
 
     private function hasThru($documentId)
@@ -849,7 +890,7 @@ class Document
         try {
             $this->db->beginTransaction();
 
-            $departmentId = (int) $data['origin_department_id'];
+            $departmentId = $this->resolveDocumentPrefixDepartmentId((int) $data['origin_department_id']);
 
             $stmt = $this->db->prepare("SELECT code FROM departments WHERE id = :department_id");
             $stmt->execute(['department_id' => $departmentId]);
@@ -1975,6 +2016,26 @@ class Document
         }
 
         return $sql;
+    }
+
+    public function paginateAllDocuments($filters, $page, $perPage)
+    {
+        $params = [];
+        $from = 'FROM documents d';
+        $where = 'WHERE 1=1' . $this->buildDocumentFilterClause($filters, $params);
+
+        $countStmt = $this->db->prepare("SELECT COUNT(DISTINCT d.id) {$from} {$where}");
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $perPage = max(1, min(100, (int) $perPage));
+        $page = max(1, (int) $page);
+        $offset = ($page - 1) * $perPage;
+        $order = 'ORDER BY COALESCE(d.released_at, d.created_at) DESC, d.created_at DESC';
+        $stmt = $this->db->prepare("SELECT DISTINCT d.* {$from} {$where} {$order} LIMIT {$perPage} OFFSET {$offset}");
+        $stmt->execute($params);
+
+        return ['items' => $stmt->fetchAll(PDO::FETCH_ASSOC), 'total' => $total];
     }
 
     public function paginateForDepartment($departmentId, $filters, $scope, $page, $perPage, $managerUserId = null, $currentUserId = null)

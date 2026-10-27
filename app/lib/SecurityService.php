@@ -187,6 +187,11 @@ class SecurityService
 
     public function audit($eventType, $actorUserId = null, $targetUserId = null, $metadata = [])
     {
+        $client = clientRequestContext();
+        $metadata += [
+            'request_id' => securityRequestId(), 'peer_ip' => $client['peer_ip'],
+            'source' => $client['source'], 'forwarded_status' => $client['forwarded_status'],
+        ];
         $this->db->query("
             INSERT INTO security_audit_log
                 (event_type, actor_user_id, target_user_id, ip_address, user_agent, metadata)

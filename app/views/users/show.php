@@ -23,6 +23,7 @@ $statusStyle = ($user->status ?? '') === 'active'
     <p class="text-muted">Reset only after verifying the user's identity through an approved offline process.</p>
     <form method="POST" action="<?php echo URLROOT; ?>/users/resetMfa/<?php echo (int) $user->id; ?>" onsubmit="return confirm('Reset MFA for this user?');">
         <?php echo csrfInput(); ?>
+        <?php echo adminActionInputs('mfa_reset',(int)$user->id,true); ?>
         <button class="btn btn-outline-danger" type="submit">Reset MFA enrollment</button>
     </form>
 </div>
@@ -62,6 +63,7 @@ $statusStyle = ($user->status ?? '') === 'active'
         <div class="app-card p-4 p-lg-5">
             <div class="text-muted small text-uppercase fw-semibold mb-3">Change Password</div>
             <form action="<?php echo URLROOT; ?>/users/updateUserPassword/<?php echo (int) $user->id; ?>" method="POST">
+                <?php echo adminActionInputs('password',(int)$user->id,true); ?>
                 <?php echo csrfInput(); ?>
                 <div class="row g-4">
                     <div class="col-md-6">
@@ -84,6 +86,7 @@ $statusStyle = ($user->status ?? '') === 'active'
                     <form action="<?php echo URLROOT; ?>/users/updateRole/<?php echo (int) $user->id; ?>" method="POST" onsubmit="return confirm('Change role for <?php echo htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8'); ?>? Personal history remains attached to the user; manager access follows the selected role and office.');">
                         <?php echo csrfInput(); ?>
                         <label class="form-label fw-semibold">Role</label>
+                        <?php echo adminActionInputs('role',(int)$user->id); ?>
                         <select name="role" class="form-select" required>
                             <?php foreach (($data['roles'] ?? []) as $roleValue => $roleName): ?>
                                 <option value="<?php echo htmlspecialchars($roleValue); ?>" <?php echo (string) $user->role === (string) $roleValue ? 'selected' : ''; ?>>
@@ -102,8 +105,15 @@ $statusStyle = ($user->status ?? '') === 'active'
                 <div class="app-card p-4 h-100">
                     <div class="text-muted small text-uppercase fw-semibold mb-3">Change Status</div>
                     <form action="<?php echo URLROOT; ?>/users/updateStatus/<?php echo (int) $user->id; ?>" method="POST">
+                        <?php if (!empty($data['registration_review'])): ?>
+                            <p>Registration review: <?php echo htmlspecialchars(ucfirst($data['registration_review']['decision'])); ?>. Verify employee eligibility independently before activation. Selecting inactive rejects or suspends the account.</p>
+                            <?php if (!empty($data['registration_review']['reason'])): ?><p>Last review note: <?php echo htmlspecialchars($data['registration_review']['reason']); ?></p><?php endif; ?>
+                            <label for="registration_review_reason">Verification or rejection note</label>
+                            <textarea id="registration_review_reason" name="reason" class="form-control" rows="2" minlength="10" maxlength="500" required placeholder="Record the verification reference or reason; omit passwords and invitation codes."></textarea>
+                        <?php endif; ?>
                         <?php echo csrfInput(); ?>
                         <label class="form-label fw-semibold">Status</label>
+                        <?php echo adminActionInputs('status',(int)$user->id); ?>
                         <select name="status" class="form-select" required>
                             <option value="active" <?php echo ($user->status ?? '') === 'active' ? 'selected' : ''; ?>>Active</option>
                             <option value="inactive" <?php echo ($user->status ?? '') === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
@@ -119,6 +129,7 @@ $statusStyle = ($user->status ?? '') === 'active'
                     <form action="<?php echo URLROOT; ?>/users/updateDepartment/<?php echo (int) $user->id; ?>" method="POST" onsubmit="return confirm('Change office for <?php echo htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8'); ?>? Personal history remains attached to the user; manager access follows the selected role and office.');">
                         <?php echo csrfInput(); ?>
                         <label class="form-label fw-semibold">Department</label>
+                        <?php echo adminActionInputs('department',(int)$user->id); ?>
                         <select name="department_id" class="form-select" required>
                             <option value="">Select department</option>
                             <?php foreach (($data['departments'] ?? []) as $department): ?>

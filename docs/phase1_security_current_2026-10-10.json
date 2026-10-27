@@ -1,0 +1,166 @@
+﻿{
+    "clock": {
+        "database_time": "2026-10-10 16:40:17",
+        "database_utc_time": "2026-10-10 08:40:17",
+        "system_timezone": "Asia/Taipei"
+    },
+    "hours": 24,
+    "mode": "observe",
+    "counter_table_ready": true,
+    "counter_rows": 0,
+    "expired_counter_rows": 0,
+    "pruned_counter_rows": 0,
+    "candidate_policies": {
+        "login": {
+            "window_seconds": 900,
+            "subject": 10,
+            "ip": 500,
+            "global": 5000
+        },
+        "mfa": {
+            "window_seconds": 300,
+            "subject": 5,
+            "ip": 500,
+            "global": 5000
+        },
+        "password_reset": {
+            "window_seconds": 900,
+            "subject": 3,
+            "ip": 200,
+            "global": 2000
+        },
+        "registration": {
+            "window_seconds": 900,
+            "subject": 3,
+            "ip": 100,
+            "global": 1000
+        }
+    },
+    "policy_approval": "Pending; no new blocking is enabled",
+    "observed_attempts": [],
+    "threshold_crossings": [],
+    "rejected_requests": [],
+    "reset_transport_acceptance": [
+        {
+            "transport": "smtp",
+            "mail_accepted": "true",
+            "requests": 8
+        }
+    ],
+    "request_attribution": [],
+    "events": [
+        {
+            "event_type": "account_registered",
+            "event_count": 70
+        },
+        {
+            "event_type": "inactive_account_login",
+            "event_count": 20
+        },
+        {
+            "event_type": "login_blocked",
+            "event_count": 5
+        },
+        {
+            "event_type": "login_failed",
+            "event_count": 56
+        },
+        {
+            "event_type": "login_succeeded",
+            "event_count": 10
+        },
+        {
+            "event_type": "logout",
+            "event_count": 1
+        },
+        {
+            "event_type": "mfa_failed",
+            "event_count": 209
+        },
+        {
+            "event_type": "mfa_succeeded",
+            "event_count": 1
+        },
+        {
+            "event_type": "mfa_trusted_device_used",
+            "event_count": 1
+        },
+        {
+            "event_type": "password_reset_completed",
+            "event_count": 6
+        },
+        {
+            "event_type": "password_reset_requested",
+            "event_count": 8
+        }
+    ],
+    "daily_events": [
+        {
+            "day": "2026-10-09",
+            "event_type": "login_succeeded",
+            "event_count": 3
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "account_registered",
+            "event_count": 70
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "inactive_account_login",
+            "event_count": 20
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "login_blocked",
+            "event_count": 5
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "login_failed",
+            "event_count": 56
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "login_succeeded",
+            "event_count": 7
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "logout",
+            "event_count": 1
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "mfa_failed",
+            "event_count": 209
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "mfa_succeeded",
+            "event_count": 1
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "mfa_trusted_device_used",
+            "event_count": 1
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "password_reset_completed",
+            "event_count": 6
+        },
+        {
+            "day": "2026-10-10",
+            "event_type": "password_reset_requested",
+            "event_count": 8
+        }
+    ],
+    "interpretation": [
+        "Historical activity is not verified legitimate usage and includes the incident/testing windows.",
+        "login_succeeded is a legacy password-stage event; do not add it to password_accepted.",
+        "authentication_completed records completed authentication; older MFA successes/device events remain separate.",
+        "SMTP acceptance is not inbox delivery. Threshold crossings are observations, not rejected requests.",
+        "Review application logs for monitoring-unavailable and threshold warnings; no external alerts are sent."
+    ]
+}

@@ -75,6 +75,10 @@ if ($configuredCookiePath === '' || $configuredCookiePath === '/') {
 }
 define('APP_COOKIE_PATH', $configuredCookiePath);
 define('TRUSTED_PROXIES', array_values(array_filter(array_map('trim', explode(',', (string) (getenv('TRUSTED_PROXIES') ?: ''))))));
+// Phase 1 only records candidate policy crossings; no new blocking is enabled.
+define('SECURITY_MONITOR_MODE', strtolower(trim((string) (getenv('SECURITY_MONITOR_MODE') ?: 'observe'))));
+define('SECURITY_MONITOR_RETENTION_HOURS', max(1, min(168, (int) (getenv('SECURITY_MONITOR_RETENTION_HOURS') ?: 48))));
+define('SECURITY_MONITOR_POLICY_JSON', trim((string) (getenv('SECURITY_MONITOR_POLICY_JSON') ?: '')));
 define('REQUIRE_MALWARE_SCAN', filter_var(getenv('REQUIRE_MALWARE_SCAN') ?: '0', FILTER_VALIDATE_BOOLEAN));
 define('MALWARE_SCAN_COMMAND', trim((string) (getenv('MALWARE_SCAN_COMMAND') ?: '')));
 define('UPLOAD_STORAGE_QUOTA_MB', max(100, (int) (getenv('UPLOAD_STORAGE_QUOTA_MB') ?: 10240)));

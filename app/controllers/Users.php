@@ -86,6 +86,7 @@ class Users extends Controller
                 'departments' => $this->departmentModel->getAll(),
                 'roles' => User::roles(),
                 'access_history' => $this->userModel->getAccessChangeHistory((int) $id),
+                'registration_review' => RegistrationProtection::enabled() ? RegistrationProtection::configured()->reviewRecord((int) $id) : null,
                 'success' => pullFlash('users_success')['message'] ?? '',
                 'error' => pullFlash('users_error')['message'] ?? ''
             ];
@@ -273,6 +274,7 @@ class Users extends Controller
                 redirect($redirectPath, 303);
             }
 
+            requireAdminAction('role',(int)$id);
             $this->userModel->updateRoleWithHistory(
                 (int) $id,
                 $role,
@@ -330,6 +332,7 @@ class Users extends Controller
                 redirect($redirectPath, 303);
             }
 
+            requireAdminAction('department',(int)$id);
             $this->userModel->updateDepartmentWithHistory(
                 (int) $id,
                 $departmentId,
@@ -392,6 +395,7 @@ class Users extends Controller
                 throw new ValidationException('Password confirmation does not match.');
             }
 
+            requireAdminAction('password',(int)$id);
             $this->userModel->updatePassword((int) $id, $newPassword);
             securityAudit('administrator_password_reset', (int) $_SESSION['user_id'], (int) $id);
 
@@ -443,6 +447,7 @@ class Users extends Controller
             if ((int) $user->id === (int) $_SESSION['user_id']) {
                 throw new ValidationException('Another administrator must perform your MFA recovery.');
             }
+            requireAdminAction('mfa_reset',(int)$id);
             $this->userModel->disableMfa((int) $id);
             securityAudit('mfa_reset_by_administrator', (int) $_SESSION['user_id'], (int) $id);
             flash('users_success', 'MFA was reset. Administrators must enroll again at next login; other users may enroll again from their profile.', 'success');
@@ -471,7 +476,16 @@ class Users extends Controller
                 throw new ValidationException('You cannot deactivate your own account.');
             }
 
-            $this->userModel->updateStatus((int) $id, $status);
+            requireAdminAction('status',(int)$id);
+            $registration = RegistrationProtection::enabled() ? RegistrationProtection::configured() : null;
+            if ($registration && $registration->reviewRecord((int) $id)) {
+                try {
+                    $registration->review((int) $_SESSION['user_id'], (int) $id, $status === 'active' ? 'approved' : 'rejected',
+                        is_string($_POST['reason'] ?? '') ? $_POST['reason'] : '');
+                } catch (InvalidArgumentException $e) { throw new ValidationException($e->getMessage()); }
+            } else {
+                $this->userModel->updateStatus((int) $id, $status);
+            }
             securityAudit('user_status_changed', (int) $_SESSION['user_id'], (int) $id, ['from' => $user->status, 'to' => $status]);
 
             if ($status === 'active') {

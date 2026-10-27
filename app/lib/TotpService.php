@@ -19,15 +19,19 @@ class TotpService
 
     public static function verify($secret, $code, $window = 1)
     {
-        $code = preg_replace('/\D/', '', (string) $code);
-        if (strlen($code) !== 6) {
+        return self::matchingStep($secret, $code, time(), $window) !== false;
+    }
+
+    public static function matchingStep($secret, $code, $now, $window = 1)
+    {
+        if (!is_scalar($code) || !preg_match('/^[0-9]{6}$/D', (string) $code)) {
             return false;
         }
 
-        $counter = (int) floor(time() / 30);
+        $counter = (int) floor($now / 30);
         for ($offset = -$window; $offset <= $window; $offset++) {
             if (hash_equals(self::code($secret, $counter + $offset), $code)) {
-                return true;
+                return $counter + $offset;
             }
         }
         return false;

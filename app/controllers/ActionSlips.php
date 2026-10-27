@@ -617,7 +617,9 @@ class ActionSlips extends Controller
             $viewDivisionId = ($this->isManager() && $this->isDivision($viewerDepartmentId) && !empty($viewerDivisionAssignment))
                 ? $viewerDepartmentId
                 : $currentDivisionId;
-            $staffDepartmentId = ($this->isManager() && $this->isUnit()) ? $viewerDepartmentId : ($currentUnitId > 0 ? $currentUnitId : ($viewDivisionId > 0 ? $viewDivisionId : $currentDepartmentId));
+            $staffDepartmentId = $this->isManager()
+                ? $viewerDepartmentId
+                : ($currentUnitId > 0 ? $currentUnitId : ($viewDivisionId > 0 ? $viewDivisionId : $currentDepartmentId));
             $releasedToLabel = $slip['current_unit_name'] ?: ($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-'));
             $releasedToSubtext = $slip['assigned_staff_name'] ?? '';
             if (!empty($viewerDivisionAssignment)) {
@@ -633,11 +635,18 @@ class ActionSlips extends Controller
                 'child_divisions' => $this->departmentModel->getChildDepartmentsForParent($currentDepartmentId),
                 'child_units' => $viewDivisionId > 0 ? $this->departmentModel->getUnitsForDivision($viewDivisionId) : [],
                 'unit_managers' => $viewDivisionId > 0 ? $this->slipModel->getActiveManagersByChildUnits($viewDivisionId) : [],
-                'division_staff' => $this->slipModel->getActiveStaffByDepartment($staffDepartmentId),
+                'division_staff' => $this->isManager() && $this->isDivision($viewerDepartmentId)
+                    ? $this->slipModel->getActiveStaffInDivisionHierarchy($viewerDepartmentId, $slipId)
+                    : $this->slipModel->getEligibleStaffByDepartment($slipId, $staffDepartmentId),
+                'staff_assignment' => $this->slipModel->findStaffAssignmentForUser($slipId, $this->currentUserId()),
                 'completed_staff_assignments' => $this->slipModel->getCompletedStaffAssignmentsForDepartment($slipId, $this->currentDepartmentId()),
                 'completed_unit_assignments' => $this->slipModel->getCompletedUnitAssignmentsForDivision($slipId, $this->currentDepartmentId()),
                 'released_to_label' => $releasedToLabel,
                 'released_to_subtext' => $releasedToSubtext,
+                'division_delegated' => $this->isManager() && $this->isDivision($viewerDepartmentId)
+                    && $this->slipModel->hasDelegatedAssignmentsForDivision($slipId, $viewerDepartmentId)
+                    && ($this->slipModel->hasUnresolvedUnitAssignmentsForDivision($slipId, $viewerDepartmentId)
+                        || $this->slipModel->hasUnresolvedStaffAssignmentsForDepartment($slipId, $viewerDepartmentId)),
                 'actions' => $this->allowedActions($slip),
                 'action_options' => DepartmentActionSlip::actionOptions()
             ];
@@ -680,18 +689,39 @@ class ActionSlips extends Controller
         $isDepartmentLevelSlip = $receivingLevel === 'Department' && $currentDivisionId === 0 && $assignedStaffId === 0;
         $wasCompletedByStaff = $this->slipModel->hasCompletedStaffAssignmentsForDepartment((int) $slip['id'], $deptId);
         $wasCompletedByUnit = $this->slipModel->hasCompletedUnitAssignmentsForDivision((int) $slip['id'], $deptId);
+        $hasPendingUnitCompletion = $isDivisionManager && $wasCompletedByUnit;
+        $divisionDelegated = $isDivisionManager && $this->slipModel->hasDelegatedAssignmentsForDivision((int) $slip['id'], $deptId);
         $hasUnresolvedStaffAssignments = $this->slipModel->hasUnresolvedStaffAssignmentsForDepartment((int) $slip['id'], $deptId);
         $hasActiveStaffAssignments = $this->slipModel->hasActiveStaffAssignmentsForDepartment((int) $slip['id'], $deptId);
         $isReturnedToStaff = !empty($staffAssignment) && $staffAssignmentStatus === DepartmentActionSlip::STATUS_RETURNED;
-        $canDelegateStaff = $isUnitManager
-            && !$isReturnedToStaff
+        $divisionWorkStatuses = [
+            DepartmentActionSlip::STATUS_RECEIVED,
+            DepartmentActionSlip::STATUS_FOR_ACTION,
+            DepartmentActionSlip::STATUS_RETURNED
+        ];
+        $managerStaffDelegationStatuses = [
+            DepartmentActionSlip::STATUS_RECEIVED,
+            DepartmentActionSlip::STATUS_FOR_ACTION,
+            DepartmentActionSlip::STATUS_RETURNED
+        ];
+        $canDepartmentDelegateStaff = $isDepartmentManager && (
+            (!empty($departmentAssignment) && in_array($departmentAssignmentStatus, $managerStaffDelegationStatuses, true))
+            || (empty($departmentAssignment) && in_array($status, $managerStaffDelegationStatuses, true))
+        );
+        $canDivisionDelegateStaff = $isDivisionManager && !$divisionDelegated && (
+            (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, $managerStaffDelegationStatuses, true))
+            || (empty($divisionAssignment) && in_array($status, $managerStaffDelegationStatuses, true))
+        );
+        $canUnitDelegateStaff = $isUnitManager && (
+            (!empty($unitAssignment) && in_array($unitAssignmentStatus, $managerStaffDelegationStatuses, true))
+            || (empty($unitAssignment) && in_array($status, $managerStaffDelegationStatuses, true))
+        );
+        $canDelegateStaff = !$isReturnedToStaff
             && !$hasActiveStaffAssignments
-            && (
-                (!empty($unitAssignment) && in_array($unitAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
-                || (empty($unitAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
-            );
+            && ($canDepartmentDelegateStaff || $canDivisionDelegateStaff || $canUnitDelegateStaff);
 
         return [
+            'delegate_recipients' => $canDivisionDelegateStaff,
             'receive_department' => $isDepartmentManager && ($isDepartmentLevelSlip || !empty($departmentAssignment)) && (
                 (!empty($departmentAssignment) && $departmentAssignmentStatus === DepartmentActionSlip::STATUS_RELEASED)
                 || (empty($departmentAssignment) && $status === DepartmentActionSlip::STATUS_RELEASED)
@@ -715,28 +745,30 @@ class ActionSlips extends Controller
                 (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true))
                 || (empty($divisionAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED], true))
             ),
-            'delegate_unit' => $isDivisionManager && (($currentUnitId === 0 && $assignedStaffId === 0) || !empty($divisionAssignment)) && (
-                (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
-                || (empty($divisionAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            'delegate_unit' => $isDivisionManager && !$hasPendingUnitCompletion && !$divisionDelegated && (($currentUnitId === 0 && $assignedStaffId === 0) || !empty($divisionAssignment)) && (
+                (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, $divisionWorkStatuses, true))
+                || (empty($divisionAssignment) && in_array($status, $divisionWorkStatuses, true))
             ),
-            'receive_unit' => $isUnitManager && $assignedStaffId === 0 && (
+            'receive_unit' => $isUnitManager && (
                 (!empty($unitAssignment) && $unitAssignmentStatus === DepartmentActionSlip::STATUS_DELEGATED)
-                || (empty($unitAssignment) && $status === DepartmentActionSlip::STATUS_DELEGATED)
+                || (empty($unitAssignment) && $assignedStaffId === 0 && $status === DepartmentActionSlip::STATUS_DELEGATED)
             ),
             'delegate_staff' => $canDelegateStaff,
+            'delegate_staff_to_department_staff' => $canDelegateStaff && $isDepartmentManager,
+            'delegate_staff_to_division_staff' => $canDelegateStaff && $isDivisionManager,
             'delegate_staff_to_unit_staff' => $canDelegateStaff && $isUnitManager,
-            'complete_unit' => $isUnitManager && $assignedStaffId === 0 && !$hasUnresolvedStaffAssignments && (
+            'complete_unit' => $isUnitManager && !$hasUnresolvedStaffAssignments && (
                 (!empty($unitAssignment) && in_array($unitAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
-                || (empty($unitAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+                || (empty($unitAssignment) && $assignedStaffId === 0 && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
             ),
-            'complete_division' => $isDivisionManager && (($currentUnitId === 0 && $assignedStaffId === 0) || !empty($divisionAssignment)) && (
-                (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
-                || (empty($divisionAssignment) && in_array($status, [DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
+            'complete_division' => $isDivisionManager && !$hasPendingUnitCompletion && !$divisionDelegated && (($currentUnitId === 0 && $assignedStaffId === 0) || !empty($divisionAssignment)) && (
+                (!empty($divisionAssignment) && in_array($divisionAssignmentStatus, $divisionWorkStatuses, true))
+                || (empty($divisionAssignment) && in_array($status, $divisionWorkStatuses, true))
             ),
-            'confirm_division' => $isDivisionManager && $currentUnitId === 0 && $wasCompletedByStaff,
+            'confirm_division' => $isDivisionManager && $wasCompletedByStaff,
             'confirm_unit' => $isUnitManager && $wasCompletedByStaff,
             'confirm_unit_for_division' => $isDivisionManager && $wasCompletedByUnit,
-            'return_staff_completion' => (($isDivisionManager && $currentUnitId === 0) || $isUnitManager) && $wasCompletedByStaff,
+            'return_staff_completion' => ($isDivisionManager || $isUnitManager) && $wasCompletedByStaff,
             'return_unit_completion' => $isDivisionManager && $wasCompletedByUnit,
             'start_staff' => $isAssignedStaff && (
                 (!empty($staffAssignment) && in_array($staffAssignmentStatus, [DepartmentActionSlip::STATUS_RELEASED, DepartmentActionSlip::STATUS_DELEGATED, DepartmentActionSlip::STATUS_RETURNED], true))
@@ -746,7 +778,7 @@ class ActionSlips extends Controller
                 (!empty($staffAssignment) && in_array($staffAssignmentStatus, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
                 || (empty($staffAssignment) && in_array($status, [DepartmentActionSlip::STATUS_FOR_ACTION, DepartmentActionSlip::STATUS_RECEIVED, DepartmentActionSlip::STATUS_RETURNED], true))
             ),
-            'return' => (((($isDivisionManager && $currentUnitId === 0) || $isUnitManager) && $wasCompletedByStaff) || ($isDivisionManager && $wasCompletedByUnit))
+            'return' => ((($isDivisionManager || $isUnitManager) && $wasCompletedByStaff) || ($isDivisionManager && $wasCompletedByUnit))
         ];
     }
 
@@ -942,33 +974,30 @@ class ActionSlips extends Controller
         });
     }
 
-    public function delegateUnit($id)
+    public function delegateRecipients($id)
     {
         $this->handleAction($id, function ($slipId, $slip) {
-            if (!$this->allowedActions($slip)['delegate_unit']) {
+            if (!$this->allowedActions($slip)['delegate_recipients']) {
                 throw new AuthorizationException('Unauthorized action.');
             }
-
             $managerIds = $this->postedUnitManagerIds();
-            if (empty($managerIds)) {
-                throw new ValidationException('Select at least one active unit manager under the current division.');
+            $staffIds = $this->postedDelegateStaffIds();
+            if (!$managerIds && !$staffIds) {
+                throw new ValidationException('Select at least one unit head or division staff member.');
             }
-
-            foreach ($managerIds as $managerId) {
-                if (!$this->slipModel->findActiveManagerInChildUnit($managerId, $this->currentDepartmentId())) {
-                    throw new ValidationException('Select active unit managers under the current division.');
-                }
+            $this->slipModel->delegateDivisionRecipients($slipId, $managerIds, $staffIds,
+                $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
+            foreach (array_merge($managerIds, $staffIds) as $recipientId) {
+                $this->notificationModel->create($recipientId, 'Action slip delegated',
+                    $slip['slip_number'] . ' was delegated to you.', '/actionSlips/show/' . $slipId);
             }
-
-            $remarks = trim($_POST['remarks'] ?? '');
-            foreach ($managerIds as $managerId) {
-                $manager = $this->slipModel->findActiveManagerInChildUnit((int) $managerId, $this->currentDepartmentId());
-                $this->slipModel->delegateToUnit($slipId, (int) $manager['department_id'], (int) $managerId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
-                $this->notificationModel->create((int) $managerId, 'Action slip assigned to unit', $slip['slip_number'] . ' was assigned to your unit.', '/actionSlips/show/' . $slipId);
-            }
-
-            flash('success', 'Action slip delegated to selected unit managers.', 'success');
+            flash('success', 'Action slip delegated to all selected recipients. Awaiting completion.', 'success');
         });
+    }
+
+    public function delegateUnit($id)
+    {
+        $this->delegateRecipients($id);
     }
 
     public function receiveUnit($id)
@@ -984,6 +1013,10 @@ class ActionSlips extends Controller
 
     public function delegateStaff($id)
     {
+        if ($this->isManager() && $this->isDivision()) {
+            $this->delegateRecipients($id);
+            return;
+        }
         $this->handleAction($id, function ($slipId, $slip) {
             if (!$this->allowedActions($slip)['delegate_staff']) {
                 throw new AuthorizationException('Unauthorized action.');
@@ -1001,8 +1034,8 @@ class ActionSlips extends Controller
             }
 
             $remarks = trim($_POST['remarks'] ?? '');
+            $this->slipModel->delegateStaffRecipients($slipId, $staffIds, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
             foreach ($staffIds as $staffId) {
-                $this->slipModel->delegateToStaff($slipId, (int) $staffId, $this->currentUserId(), $this->currentDepartmentId(), $remarks);
                 $this->notificationModel->create((int) $staffId, 'Action slip assigned', $slip['slip_number'] . ' was assigned to you.', '/actionSlips/show/' . $slipId);
             }
 
@@ -1055,7 +1088,8 @@ class ActionSlips extends Controller
             $this->slipModel->completeByStaff($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), $attachment);
             $title = $wasReturned ? 'Action slip resubmitted by staff' : 'Action slip completed by staff';
             $message = $wasReturned ? $slip['slip_number'] . ' was resubmitted by staff.' : $slip['slip_number'] . ' was marked completed by staff.';
-            $this->notificationModel->notifyDepartmentManagers([$this->currentDepartmentId()], $title, $message, '/actionSlips/show/' . $slipId, $this->currentUserId());
+            $reviewerDepartmentId = (int) ($staffAssignment['department_id'] ?? $this->currentDepartmentId());
+            $this->notificationModel->notifyDepartmentManagers([$reviewerDepartmentId], $title, $message, '/actionSlips/show/' . $slipId, $this->currentUserId());
             flash('success', $wasReturned ? 'Action slip resubmitted to your manager.' : 'Action slip marked completed by staff.', 'success');
         });
     }
@@ -1067,10 +1101,14 @@ class ActionSlips extends Controller
             if (empty($actions['confirm_division']) && empty($actions['confirm_unit_for_division'])) {
                 throw new AuthorizationException('Unauthorized action.');
             }
-            if (!empty($actions['confirm_unit_for_division']) && empty($_POST['assignment_id'])) {
-                throw new ValidationException('Select a completed unit assignment to confirm.');
+            $completionType = $_POST['completion_type'] ?? 'unit';
+            if (!in_array($completionType, ['unit', 'staff'], true)
+                || empty($_POST['assignment_id'])
+                || empty($actions[$completionType === 'staff' ? 'confirm_division' : 'confirm_unit_for_division'])) {
+                throw new ValidationException('Select a completed assignment to confirm.');
             }
-            $this->slipModel->confirmByDivisionManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), (int) ($_POST['assignment_id'] ?? 0));
+            $attachment = $this->handleUpload('completion_attachment', 'action_slips/completions');
+            $this->slipModel->confirmByDivisionManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), (int) $_POST['assignment_id'], $attachment, $completionType);
             $this->notificationModel->notifyDepartmentManagers([(int) ($slip['current_department_id'] ?: $slip['receiving_department_id'])], 'Action slip confirmed', $slip['slip_number'] . ' was confirmed by the division manager.', '/actionSlips/show/' . $slipId, $this->currentUserId());
             flash('success', 'Completion confirmed by division manager.', 'success');
         });
@@ -1082,7 +1120,8 @@ class ActionSlips extends Controller
             if (!$this->allowedActions($slip)['confirm_unit']) {
                 throw new AuthorizationException('Unauthorized action.');
             }
-            $this->slipModel->confirmByUnitManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), (int) ($_POST['assignment_id'] ?? 0));
+            $attachment = $this->handleUpload('completion_attachment', 'action_slips/completions');
+            $this->slipModel->confirmByUnitManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), (int) ($_POST['assignment_id'] ?? 0), $attachment);
             flash('success', 'Staff completion confirmed. You may now mark the unit task completed.');
         });
     }
@@ -1093,7 +1132,8 @@ class ActionSlips extends Controller
             if (!$this->allowedActions($slip)['complete_unit']) {
                 throw new AuthorizationException('Unauthorized action.');
             }
-            $this->slipModel->completeByUnitManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
+            $attachment = $this->handleUpload('completion_attachment', 'action_slips/completions');
+            $this->slipModel->completeByUnitManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), $attachment);
             $divisionId = (int) ($slip['current_division_id'] ?: 0);
             if ($divisionId > 0) {
                 $this->notificationModel->notifyDepartmentManagers([$divisionId], 'Action slip completed by unit', $slip['slip_number'] . ' was marked completed by the unit manager.', '/actionSlips/show/' . $slipId, $this->currentUserId());
@@ -1108,7 +1148,8 @@ class ActionSlips extends Controller
             if (!$this->allowedActions($slip)['complete_division']) {
                 throw new AuthorizationException('Unauthorized action.');
             }
-            $this->slipModel->confirmByDivisionManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
+            $attachment = $this->handleUpload('completion_attachment', 'action_slips/completions');
+            $this->slipModel->confirmByDivisionManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), null, $attachment);
             $this->notificationModel->notifyDepartmentManagers([(int) ($slip['current_department_id'] ?: $slip['receiving_department_id'])], 'Action slip completed by division', $slip['slip_number'] . ' was marked completed by the division manager.', '/actionSlips/show/' . $slipId, $this->currentUserId());
             flash('success', 'Action slip completed by division manager.', 'success');
         });
@@ -1120,7 +1161,8 @@ class ActionSlips extends Controller
             if (!$this->allowedActions($slip)['complete_department']) {
                 throw new AuthorizationException('Unauthorized action.');
             }
-            $this->slipModel->completeByDepartmentManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''));
+            $attachment = $this->handleUpload('completion_attachment', 'action_slips/completions');
+            $this->slipModel->completeByDepartmentManager($slipId, $this->currentUserId(), $this->currentDepartmentId(), trim($_POST['remarks'] ?? ''), $attachment);
             flash('success', 'Department action slip completed.', 'success');
         });
     }
@@ -1136,7 +1178,15 @@ class ActionSlips extends Controller
             if ($remarks === '') {
                 throw new ValidationException('Remarks are required when returning an action slip.');
             }
-            if (!empty($actions['return_staff_completion'])) {
+            $completionType = $_POST['completion_type'] ?? (!empty($actions['return_staff_completion']) ? 'staff' : 'unit');
+            if ($this->isDivision() && empty($_POST['assignment_id'])) {
+                throw new ValidationException('Select a completed assignment to return.');
+            }
+            if (!in_array($completionType, ['staff', 'unit'], true)
+                || empty($actions[$completionType === 'staff' ? 'return_staff_completion' : 'return_unit_completion'])) {
+                throw new AuthorizationException('Unauthorized action.');
+            }
+            if ($completionType === 'staff') {
                 $reason = trim($_POST['return_reason'] ?? '');
                 $allowedReasons = ['Did not pass standards', 'Change of instruction', 'Other'];
                 if (!in_array($reason, $allowedReasons, true)) {

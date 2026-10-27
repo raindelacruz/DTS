@@ -303,12 +303,13 @@ $statusStyle = [
                     </form>
                 <?php endif; ?>
 
-                <?php if (!empty($actions['delegate_unit'])): ?>
-                    <form action="<?php echo URLROOT; ?>/actionSlips/delegateUnit/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-unit-delegate-form>
+                <?php if (!empty($actions['delegate_recipients'])): ?>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/delegateRecipients/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-unit-delegate-form>
                         <?php echo csrfInput(); ?>
-                        <div class="fw-bold mb-2">Further Delegate to Unit</div>
+                        <div class="fw-bold mb-2">Delegate to Unit Heads and Individuals</div>
+                        <p class="small text-muted">Select all intended recipients before delegating. Further delegation will be unavailable while their work is being handled.</p>
                         <label id="delegate_unit_label" class="visually-hidden">Select unit manager</label>
-                        <div class="route-multiselect mb-2" data-delegate-unit-multiselect data-route-required>
+                        <div class="route-multiselect mb-2" data-delegate-unit-multiselect>
                             <button
                                 type="button"
                                 class="form-select route-multiselect-toggle text-start"
@@ -345,10 +346,20 @@ $statusStyle = [
                                     <div class="route-empty-state d-none" data-route-empty>No unit managers match your search.</div>
                                 </div>
                             </div>
-                            <div class="invalid-feedback" data-route-required-error>Select at least one unit manager.</div>
+                            <div class="invalid-feedback" data-route-required-error>Select at least one unit head or division staff member.</div>
                         </div>
+                        <fieldset class="mb-2">
+                            <legend class="fs-6">Individuals in this division</legend>
+                            <?php foreach (($data['division_staff'] ?? []) as $staff): ?>
+                                <label class="d-block mb-1">
+                                    <input type="checkbox" class="form-check-input me-1" name="staff_ids[]" value="<?php echo (int) $staff['id']; ?>">
+                                    <?php echo htmlspecialchars(trim($staff['firstname'] . ' ' . $staff['lastname'])); ?>
+                                    <span class="small text-muted">— <?php echo htmlspecialchars($staff['personnel_office_name'] ?? ''); ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </fieldset>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Instructions or remarks"></textarea>
-                        <button type="submit" class="btn btn-primary w-100">Delegate to Unit</button>
+                        <button type="submit" class="btn btn-primary w-100">Delegate to Selected Recipients</button>
                     </form>
                 <?php endif; ?>
 
@@ -359,10 +370,23 @@ $statusStyle = [
                     </form>
                 <?php endif; ?>
 
-                <?php if (!empty($actions['delegate_staff'])): ?>
+                <?php if (!empty($actions['delegate_staff']) && empty($actions['delegate_staff_to_division_staff'])): ?>
+                    <?php
+                        $delegateStaffLabel = 'Further Delegate to Staff';
+                        if (!empty($actions['delegate_staff_to_department_staff'])) {
+                            $delegateStaffLabel = 'Release to Department Staff';
+                        } elseif (!empty($actions['delegate_staff_to_division_staff'])) {
+                            $delegateStaffLabel = 'Further Delegate to Division Staff';
+                        } elseif (!empty($actions['delegate_staff_to_unit_staff'])) {
+                            $delegateStaffLabel = 'Further Delegate to Unit Staff';
+                        }
+                    ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/delegateStaff/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f8fafc; border:1px solid #dbeafe; box-shadow:none;" data-staff-delegate-form>
                         <?php echo csrfInput(); ?>
-                        <div class="fw-bold mb-2"><?php echo !empty($actions['delegate_staff_to_unit_staff']) ? 'Further Delegate to Unit Staff' : 'Further Delegate to Staff'; ?></div>
+                        <div class="fw-bold mb-2"><?php echo htmlspecialchars($delegateStaffLabel); ?></div>
+                        <?php if (!empty($actions['delegate_staff_to_unit_staff'])): ?>
+                            <p class="small text-muted">Staff already assigned this action slip directly or through another office are excluded. Their existing task is reviewed by the manager who assigned it.</p>
+                        <?php endif; ?>
                         <label id="delegate_staff_label" class="visually-hidden">Select staff</label>
                         <div class="route-multiselect mb-2" data-delegate-staff-multiselect data-route-required>
                             <button
@@ -403,7 +427,7 @@ $statusStyle = [
                             <div class="invalid-feedback" data-route-required-error>Select at least one staff member.</div>
                         </div>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Instructions or remarks"></textarea>
-                        <button type="submit" class="btn btn-outline-dark w-100"><?php echo !empty($actions['delegate_staff_to_unit_staff']) ? 'Further Delegate to Unit Staff' : 'Further Delegate to Staff'; ?></button>
+                        <button type="submit" class="btn btn-outline-dark w-100"><?php echo htmlspecialchars($delegateStaffLabel); ?></button>
                     </form>
                 <?php endif; ?>
 
@@ -415,21 +439,49 @@ $statusStyle = [
                 <?php endif; ?>
 
                 <?php if (!empty($actions['complete_staff'])): ?>
+                    <?php if (!empty($data['staff_assignment'])): ?>
+                        <div class="small text-muted">
+                            Assigned by <?php echo htmlspecialchars($data['staff_assignment']['assigned_by_name'] ?? ''); ?>.
+                            Submit completion to <?php echo htmlspecialchars($data['staff_assignment']['reviewing_department_name'] ?? 'your assigning office'); ?>.
+                        </div>
+                    <?php endif; ?>
                     <form action="<?php echo URLROOT; ?>/actionSlips/completeStaff/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                         <?php echo csrfInput(); ?>
                         <?php $isReturnedToStaff = ($slip['status'] ?? '') === 'Returned'; ?>
                         <div class="fw-bold mb-2"><?php echo $isReturnedToStaff ? 'Resubmit Completed Task' : 'Mark as Completed'; ?></div>
-                        <input type="file" name="completion_attachment" class="form-control mb-2" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx">
+                        <label class="d-block mb-2">Completion file (optional)<input type="file" name="completion_attachment" class="form-control mt-1" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx"></label>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="<?php echo $isReturnedToStaff ? 'Revision remarks' : 'Completion remarks'; ?>"></textarea>
                         <button type="submit" class="btn btn-success w-100"><?php echo $isReturnedToStaff ? 'Resubmit' : 'Mark as Completed'; ?></button>
                     </form>
                 <?php endif; ?>
 
                 <?php if (!empty($actions['confirm_division'])): ?>
-                    <form action="<?php echo URLROOT; ?>/actionSlips/confirmDivision/<?php echo (int) $slip['id']; ?>" method="POST">
+                    <?php foreach (($data['completed_staff_assignments'] ?? []) as $completedStaff): ?>
+                    <?php $completedStaffName = trim((string) ($completedStaff['staff_name'] ?? 'Staff')); ?>
+                    <div class="app-card p-3">
+                    <div class="fw-bold mb-2">Staff Completion: <?php echo htmlspecialchars($completedStaffName); ?></div>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/confirmDivision/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data">
                         <?php echo csrfInput(); ?>
-                        <button type="submit" class="btn btn-success w-100">Confirm Completion</button>
+                        <input type="hidden" name="assignment_id" value="<?php echo (int) $completedStaff['id']; ?>">
+                        <input type="hidden" name="completion_type" value="staff">
+                        <label class="d-block mb-2">Completion file (optional)<input type="file" name="completion_attachment" class="form-control mt-1" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx"></label>
+                        <button type="submit" class="btn btn-success w-100">Confirm Completion for <?php echo htmlspecialchars($completedStaffName); ?></button>
                     </form>
+                    <form action="<?php echo URLROOT; ?>/actionSlips/returnSlip/<?php echo (int) $slip['id']; ?>" method="POST" class="mt-2">
+                        <?php echo csrfInput(); ?>
+                        <input type="hidden" name="assignment_id" value="<?php echo (int) $completedStaff['id']; ?>">
+                        <input type="hidden" name="completion_type" value="staff">
+                        <select name="return_reason" class="form-select mb-2" required>
+                            <option value="">Select reason</option>
+                            <option value="Did not pass standards">Did not pass standards</option>
+                            <option value="Change of instruction">Change of instruction</option>
+                            <option value="Other">Other</option>
+                        </select>
+                        <textarea name="remarks" class="form-control mb-2" placeholder="Reason and revised instruction" required></textarea>
+                        <button type="submit" class="btn btn-outline-danger w-100">Return to <?php echo htmlspecialchars($completedStaffName); ?></button>
+                    </form>
+                    </div>
+                    <?php endforeach; ?>
                 <?php endif; ?>
 
                 <?php if (!empty($actions['confirm_unit']) && !empty($data['completed_staff_assignments'])): ?>
@@ -438,8 +490,9 @@ $statusStyle = [
                         <div class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                             <div class="fw-bold mb-2">Staff Completion</div>
                             <div class="small text-muted mb-2">For <?php echo htmlspecialchars($completedStaffName); ?></div>
-                            <form action="<?php echo URLROOT; ?>/actionSlips/confirmUnit/<?php echo (int) $slip['id']; ?>" method="POST" class="mb-2">
+                            <form action="<?php echo URLROOT; ?>/actionSlips/confirmUnit/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data" class="mb-2">
                                 <?php echo csrfInput(); ?>
+                                <label class="d-block mb-2">Completion file (optional)<input type="file" name="completion_attachment" class="form-control mt-1" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx"></label>
                                 <input type="hidden" name="assignment_id" value="<?php echo (int) $completedStaff['id']; ?>">
                                 <button type="submit" class="btn btn-success w-100">Confirm Completion for <?php echo htmlspecialchars($completedStaffName); ?></button>
                             </form>
@@ -471,14 +524,17 @@ $statusStyle = [
                                     <div>Submitted by <?php echo htmlspecialchars($completedUnitAssignee); ?></div>
                                 <?php endif; ?>
                             </div>
-                            <form action="<?php echo URLROOT; ?>/actionSlips/confirmDivision/<?php echo (int) $slip['id']; ?>" method="POST" class="mb-2">
+                            <form action="<?php echo URLROOT; ?>/actionSlips/confirmDivision/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data" class="mb-2">
                                 <?php echo csrfInput(); ?>
+                                <input type="hidden" name="completion_type" value="unit">
+                                <label class="d-block mb-2">Completion file (optional)<input type="file" name="completion_attachment" class="form-control mt-1" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx"></label>
                                 <input type="hidden" name="assignment_id" value="<?php echo (int) $completedUnit['id']; ?>">
                                 <button type="submit" class="btn btn-success w-100">Confirm Completion for <?php echo htmlspecialchars($completedUnitName); ?></button>
                             </form>
                             <form action="<?php echo URLROOT; ?>/actionSlips/returnSlip/<?php echo (int) $slip['id']; ?>" method="POST">
                                 <?php echo csrfInput(); ?>
                                 <input type="hidden" name="assignment_id" value="<?php echo (int) $completedUnit['id']; ?>">
+                                <input type="hidden" name="completion_type" value="unit">
                                 <select name="return_reason" class="form-select mb-2" required>
                                     <option value="">Select reason</option>
                                     <option value="Did not pass standards">Did not pass standards</option>
@@ -493,24 +549,27 @@ $statusStyle = [
                 <?php endif; ?>
 
                 <?php if (!empty($actions['complete_unit'])): ?>
-                    <form action="<?php echo URLROOT; ?>/actionSlips/completeUnit/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                    <form action="<?php echo URLROOT; ?>/actionSlips/completeUnit/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                         <?php echo csrfInput(); ?>
+                        <label class="d-block mb-2">Completion file (optional)<input type="file" name="completion_attachment" class="form-control mt-1" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx"></label>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Completion remarks"></textarea>
                         <button type="submit" class="btn btn-success w-100">Mark Unit Task Completed</button>
                     </form>
                 <?php endif; ?>
 
                 <?php if (!empty($actions['complete_division'])): ?>
-                    <form action="<?php echo URLROOT; ?>/actionSlips/completeDivision/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                    <form action="<?php echo URLROOT; ?>/actionSlips/completeDivision/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                         <?php echo csrfInput(); ?>
+                        <label class="d-block mb-2">Completion file (optional)<input type="file" name="completion_attachment" class="form-control mt-1" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx"></label>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Completion remarks"></textarea>
                         <button type="submit" class="btn btn-success w-100">Mark as Completed</button>
                     </form>
                 <?php endif; ?>
 
                 <?php if (!empty($actions['complete_department'])): ?>
-                    <form action="<?php echo URLROOT; ?>/actionSlips/completeDepartment/<?php echo (int) $slip['id']; ?>" method="POST" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
+                    <form action="<?php echo URLROOT; ?>/actionSlips/completeDepartment/<?php echo (int) $slip['id']; ?>" method="POST" enctype="multipart/form-data" class="app-card p-3" style="background:#f0fdf4; border:1px solid #bbf7d0; box-shadow:none;">
                         <?php echo csrfInput(); ?>
+                        <label class="d-block mb-2">Completion file (optional)<input type="file" name="completion_attachment" class="form-control mt-1" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx,.xls,.xlsx"></label>
                         <textarea name="remarks" class="form-control mb-2" rows="3" placeholder="Completion remarks"></textarea>
                         <button type="submit" class="btn btn-success w-100">Mark as Completed</button>
                     </form>
@@ -540,7 +599,9 @@ $statusStyle = [
                     </form>
                 <?php endif; ?>
 
-                <?php if (empty(array_filter($actions))): ?>
+                <?php if (!empty($data['division_delegated']) && empty($actions['confirm_division']) && empty($actions['confirm_unit_for_division'])): ?>
+                    <div class="text-muted small">Delegation has been submitted. Awaiting recipient completion; review actions will appear when completed work is ready.</div>
+                <?php elseif (empty(array_filter($actions))): ?>
                     <div class="text-muted small">No action is available for your role at this status.</div>
                 <?php endif; ?>
             </div>
@@ -888,7 +949,8 @@ $statusStyle = [
         );
 
         delegateUnitForm.addEventListener('submit', (event) => {
-            if (delegateUnitPicker && !delegateUnitPicker.isValid()) {
+            const hasStaff = !!delegateUnitForm.querySelector('input[name="staff_ids[]"]:checked');
+            if (delegateUnitPicker && !delegateUnitPicker.isValid() && !hasStaff) {
                 event.preventDefault();
                 delegateUnitPicker.showRequiredError();
             }

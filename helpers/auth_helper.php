@@ -21,20 +21,17 @@ class NotFoundException extends RuntimeException {}
 
 function isTrustedProxyRequest()
 {
-    $remoteAddress = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
-    return $remoteAddress !== '' && in_array($remoteAddress, TRUSTED_PROXIES, true);
+    return clientRequestContext()['trusted_peer'];
+}
+
+function clientRequestContext()
+{
+    return ClientRequestContext::resolve($_SERVER, TRUSTED_PROXIES);
 }
 
 function clientIpAddress()
 {
-    if (isTrustedProxyRequest() && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        $candidate = trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
-        if (filter_var($candidate, FILTER_VALIDATE_IP)) {
-            return $candidate;
-        }
-    }
-    $remoteAddress = (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
-    return filter_var($remoteAddress, FILTER_VALIDATE_IP) ? $remoteAddress : '0.0.0.0';
+    return clientRequestContext()['ip'];
 }
 
 function isSecureRequest()
@@ -42,7 +39,35 @@ function isSecureRequest()
     if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
         return true;
     }
-    return isTrustedProxyRequest() && strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0])) === 'https';
+    // A verified proxy must overwrite this header with one protocol value.
+    return isTrustedProxyRequest() && strtolower(trim((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))) === 'https';
+}
+
+function securityRequestId()
+{
+    static $requestId;
+    return $requestId ??= bin2hex(random_bytes(12));
+}
+
+function observeSecurityRequest($action, $subject = '', $targetUserId = null)
+{
+    if (SECURITY_MONITOR_MODE === 'off') {
+        return ['status' => 'disabled', 'mode' => 'off', 'blocked' => false, 'buckets' => []];
+    }
+    try {
+        if (SECURITY_MONITOR_MODE !== 'observe') {
+            throw new RuntimeException('Only off and observe modes are supported in Phase 1.');
+        }
+        $subject = is_scalar($subject) ? strtolower(trim((string) $subject)) : '';
+        $monitor = new SecurityRequestMonitor();
+        return $monitor->observe($action, $subject, clientRequestContext(), $targetUserId);
+    } catch (Throwable $e) {
+        appLog('error', 'Security request monitoring unavailable', [
+            'action' => $action, 'status' => 'unavailable', 'mode' => SECURITY_MONITOR_MODE,
+            'exception_type' => get_class($e), 'request_id' => securityRequestId(),
+        ]);
+        return ['status' => 'unavailable', 'mode' => SECURITY_MONITOR_MODE, 'blocked' => false, 'buckets' => []];
+    }
 }
 
 function validatePasswordPolicy($password)
@@ -258,7 +283,53 @@ function refreshAuthenticatedSession()
     if (!empty($user->mfa_enabled) && empty($_SESSION['mfa_verified'])) {
         redirect('/auth/mfa', 303);
     }
+    if ($_SESSION['role'] === 'admin' && AdminSecurity::enabled()) {
+        try {
+            $policy=AdminSecurity::configuredPolicy();
+            $access=AdminSecurity::access($_SESSION,clientIpAddress(),time(),$policy);
+            $emergencyFingerprint=$access==='emergency' ? hash('sha256',json_encode($policy['emergency'],JSON_THROW_ON_ERROR)) : null;
+            if($access==='emergency' && ($_SESSION['admin_emergency_logged']??null)!==$emergencyFingerprint) {
+                AdminSecurity::configured()->audit('admin_emergency_access',(int)$_SESSION['user_id'],null,
+                    ['expires_at'=>$policy['emergency']['expires_at'],'authorization_reference'=>$policy['emergency']['authorization_reference']]);
+                $_SESSION['admin_emergency_logged']=$emergencyFingerprint;
+            }
+        } catch(Throwable $e) {
+            appLog('error','Administrator access rejected',['exception_class'=>get_class($e)]);
+            clearAuthenticatedSession();
+            flash('auth_error','Administrator access is unavailable from this account or network. Contact the designated system administrator.','error');
+            redirect('/auth/login',303);
+        }
+    }
     return true;
+}
+
+function requireAdminAction($action,$target)
+{
+    if(!AdminSecurity::enabled()) { return; }
+    try {
+        AdminSecurity::configured()->authorize($_SESSION,(string)$action,(int)$target,
+            is_string($_POST['admin_challenge']??'') ? $_POST['admin_challenge']??'' : '',
+            is_string($_POST['admin_password']??'') ? $_POST['admin_password']??'' : '',
+            is_string($_POST['admin_code']??'') ? $_POST['admin_code']??'' : '',clientIpAddress(),
+            is_string($_POST['reason']??'') ? $_POST['reason']??'' : '');
+    } catch(ValidationException $e) { throw $e; }
+    catch(Throwable $e) {
+        appLog('error','Administrator verification unavailable',['exception_class'=>get_class($e)]);
+        throw new ValidationException('Administrator verification is unavailable. Try again later or contact the designated support owner.');
+    }
+}
+
+function adminActionInputs($action,$target,$recovery=false)
+{
+    if(!AdminSecurity::enabled()) { return ''; }
+    $challenge=AdminSecurity::challenge($_SESSION,(string)$action,(int)$target,time());
+    $prefix='admin_'.(string)$action.'_'.(int)$target;
+    $html='<fieldset class="mt-3"><legend class="h6">Confirm administrator identity</legend><p>Enter your own password and a fresh authenticator code for this change. If you just used a code, wait for the next one.</p>';
+    $html.='<input type="hidden" name="admin_challenge" value="'.htmlspecialchars($challenge,ENT_QUOTES,'UTF-8').'">';
+    $html.='<label for="'.$prefix.'_password">Your administrator password</label><input id="'.$prefix.'_password" class="form-control" type="password" name="admin_password" autocomplete="current-password" required>';
+    $html.='<label for="'.$prefix.'_code">Authenticator code</label><input id="'.$prefix.'_code" class="form-control" type="text" name="admin_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>';
+    if($recovery) { $html.='<label for="'.$prefix.'_reason">Identity verification reference</label><textarea id="'.$prefix.'_reason" class="form-control" name="reason" minlength="10" maxlength="500" required placeholder="Record the approved independent verification reference; omit passwords and codes."></textarea>'; }
+    return $html.'</fieldset>';
 }
 
 function requireLogin()

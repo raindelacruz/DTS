@@ -3,3 +3,6 @@ storage/logs/*
 storage/uploads/*
 !storage/uploads/.gitkeep
 /vendor/
+
+# Local full-system backups contain private data.
+/backups/

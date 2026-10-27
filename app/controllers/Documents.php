@@ -26,6 +26,11 @@ class Documents extends Controller
         return (($_SESSION['role'] ?? '') === 'manager');
     }
 
+    private function isAdmin()
+    {
+        return (($_SESSION['role'] ?? '') === 'admin');
+    }
+
     private function isStaff()
     {
         return (($_SESSION['role'] ?? '') === 'staff');
@@ -78,6 +83,29 @@ class Documents extends Controller
     private function isUnitStaff()
     {
         return $this->isStaff() && $this->isUnitDepartment((int) $_SESSION['department_id']);
+    }
+
+    private function divisionManagerRecipientDepartmentId()
+    {
+        $departmentId = (int) ($_SESSION['department_id'] ?? 0);
+        if ($this->isDivisionStaff()) {
+            return $departmentId;
+        }
+
+        if ($this->isUnitManager() || $this->isUnitStaff()) {
+            $department = $this->departmentModel->getDepartmentById($departmentId);
+            $parentId = (int) ($department['parent_id'] ?? 0);
+            if ($parentId > 0 && $this->isDivisionDepartment($parentId)) {
+                return $parentId;
+            }
+        }
+
+        return 0;
+    }
+
+    private function canSendToDivisionManager()
+    {
+        return $this->divisionManagerRecipientDepartmentId() > 0;
     }
 
     private function canCurrentManagerDelegateToUnit($documentId, $departmentId)
@@ -362,6 +390,7 @@ class Documents extends Controller
         $originDepartmentId = (int) $_SESSION['department_id'];
         $isDivisionStaff = $this->isDivisionStaff();
         $isDivisionManager = $this->isDivisionManager();
+        $divisionManagerDepartmentId = $this->divisionManagerRecipientDepartmentId();
 
         if (empty($toDepartmentIds) && empty($delegateDepartmentIds) && empty($managerRecipientIds) && empty($assignedStaffIds)) {
             $errors['to_department_ids'] = 'Select at least one TO department, internal division, division manager, or staff recipient.';
@@ -407,18 +436,18 @@ class Documents extends Controller
         }
 
         if (!empty($managerRecipientIds)) {
-            if (!$isDivisionStaff) {
-                $errors['manager_recipient_ids'] = 'Only division staff can send documents directly to division managers.';
+            if ($divisionManagerDepartmentId <= 0) {
+                $errors['manager_recipient_ids'] = 'Only division staff, unit heads, and unit staff can send documents directly to their division chief.';
             } else {
                 foreach ($managerRecipientIds as $managerId) {
-                    if (!$this->documentModel->findActiveManagerInDepartment((int) $managerId, $originDepartmentId)) {
+                    if (!$this->documentModel->findActiveManagerInDepartment((int) $managerId, $divisionManagerDepartmentId)) {
                         $errors['manager_recipient_ids'] = 'Select active managers under your division.';
                         break;
                     }
                 }
 
-                if (empty($errors['manager_recipient_ids']) && !in_array($originDepartmentId, $toDepartmentIds, true)) {
-                    $toDepartmentIds[] = $originDepartmentId;
+                if (empty($errors['manager_recipient_ids']) && !in_array($divisionManagerDepartmentId, $toDepartmentIds, true)) {
+                    $toDepartmentIds[] = $divisionManagerDepartmentId;
                 }
             }
         }
@@ -475,6 +504,10 @@ class Documents extends Controller
         }
 
         $deptId = (int) $_SESSION['department_id'];
+        if ($this->isAdmin()) {
+            return [$document, $deptId, false];
+        }
+
         $officeAllowed = $this->documentModel->canDepartmentViewDocument($id, $deptId);
         $personalAllowed = $this->documentModel->canUserViewPersonalDocument($id, (int) $_SESSION['user_id']);
         $allowed = $officeAllowed || $personalAllowed;
@@ -677,12 +710,12 @@ class Documents extends Controller
 
         $departmentIds = array_values(array_unique(array_filter(array_map('intval', (array) $departmentIds))));
         $divisionManagerRouteDepartmentIds = [];
-        if ($this->isDivisionStaff()) {
-            $currentDepartmentId = (int) $_SESSION['department_id'];
-            if (in_array($currentDepartmentId, $departmentIds, true)) {
-                $divisionManagerRouteDepartmentIds[] = $currentDepartmentId;
-                $departmentIds = array_values(array_filter($departmentIds, function ($departmentId) use ($currentDepartmentId) {
-                    return (int) $departmentId !== $currentDepartmentId;
+        $divisionManagerDepartmentId = $this->divisionManagerRecipientDepartmentId();
+        if ($divisionManagerDepartmentId > 0) {
+            if (in_array($divisionManagerDepartmentId, $departmentIds, true)) {
+                $divisionManagerRouteDepartmentIds[] = $divisionManagerDepartmentId;
+                $departmentIds = array_values(array_filter($departmentIds, function ($departmentId) use ($divisionManagerDepartmentId) {
+                    return (int) $departmentId !== $divisionManagerDepartmentId;
                 }));
             }
         }
@@ -733,7 +766,9 @@ class Documents extends Controller
             throw new NotFoundException('Document not found.');
         }
 
-        if ((int) $document['origin_department_id'] !== (int) $_SESSION['department_id']) {
+        $isOriginOffice = (int) $document['origin_department_id'] === (int) $_SESSION['department_id'];
+        $isCreator = (int) ($document['created_by'] ?? 0) === (int) ($_SESSION['user_id'] ?? 0);
+        if (!$isOriginOffice && !$isCreator) {
             throw new AuthorizationException('Unauthorized action.');
         }
 
@@ -750,9 +785,11 @@ class Documents extends Controller
         $departments = $this->departmentModel->getParentDepartments();
         $isDivisionManager = $this->isDivisionManager();
         $isDivisionStaff = $this->isDivisionStaff();
+        $divisionManagerDepartmentId = $this->divisionManagerRecipientDepartmentId();
+        $canSendToDivisionManagers = $divisionManagerDepartmentId > 0;
         $childDepartments = $isDivisionManager ? [] : $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
         $divisionStaff = $isDivisionManager ? $this->documentModel->getActiveStaffByDepartment((int) $_SESSION['department_id']) : [];
-        $divisionManagers = $isDivisionStaff ? $this->documentModel->getActiveManagersByDepartment((int) $_SESSION['department_id']) : [];
+        $divisionManagers = $canSendToDivisionManagers ? $this->documentModel->getActiveManagersByDepartment($divisionManagerDepartmentId) : [];
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -800,9 +837,11 @@ class Documents extends Controller
         $departments = $this->departmentModel->getParentDepartments();
         $isDivisionManager = $this->isDivisionManager();
         $isDivisionStaff = $this->isDivisionStaff();
+        $divisionManagerDepartmentId = $this->divisionManagerRecipientDepartmentId();
+        $canSendToDivisionManagers = $divisionManagerDepartmentId > 0;
         $childDepartments = $isDivisionManager ? [] : $this->departmentModel->getChildDepartmentsForParent((int) $_SESSION['department_id']);
         $divisionStaff = $isDivisionManager ? $this->documentModel->getActiveStaffByDepartment((int) $_SESSION['department_id']) : [];
-        $divisionManagers = $isDivisionStaff ? $this->documentModel->getActiveManagersByDepartment((int) $_SESSION['department_id']) : [];
+        $divisionManagers = $canSendToDivisionManagers ? $this->documentModel->getActiveManagersByDepartment($divisionManagerDepartmentId) : [];
         $documentData = [
             'title' => $state['values']['title'] ?? '',
             'particulars' => $state['values']['particulars'] ?? '',
@@ -815,7 +854,7 @@ class Documents extends Controller
         $selectedCcDepartmentIds = array_map('intval', $state['values']['cc_department_ids'] ?? []);
         $selectedDelegateDepartmentIds = array_map('intval', $state['values']['delegate_department_ids'] ?? []);
         $selectedManagerIds = array_map('intval', $state['values']['manager_recipient_ids'] ?? []);
-        if (empty($selectedManagerIds) && $isDivisionStaff && in_array((int) $_SESSION['department_id'], $selectedToDepartmentIds, true)) {
+        if (empty($selectedManagerIds) && $canSendToDivisionManagers && in_array($divisionManagerDepartmentId, $selectedToDepartmentIds, true)) {
             $selectedManagerIds = array_map(function ($manager) {
                 return (int) $manager['id'];
             }, $divisionManagers);
@@ -915,7 +954,9 @@ class Documents extends Controller
             $department_id = (int) $_SESSION['department_id'];
             $filters = $this->getListFilters();
             $pagination = paginationRequest();
-            $result = $this->documentModel->paginateForDepartment($department_id, $filters, 'all', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null, (int) $_SESSION['user_id']);
+            $result = $this->isAdmin()
+                ? $this->documentModel->paginateAllDocuments($filters, $pagination['page'], $pagination['per_page'])
+                : $this->documentModel->paginateForDepartment($department_id, $filters, 'all', $pagination['page'], $pagination['per_page'], $this->isManager() ? (int) $_SESSION['user_id'] : null, (int) $_SESSION['user_id']);
             $documents = $result['items'];
 
             $statusCounts = [
@@ -1141,7 +1182,8 @@ class Documents extends Controller
             $this->requireValidCsrfPost();
             $document = $this->findOwnedDraftOrFail($documentId);
 
-            if (!$this->departmentModel->canRelease((int) $_SESSION['department_id'])) {
+            $isCreator = (int) ($document['created_by'] ?? 0) === (int) ($_SESSION['user_id'] ?? 0);
+            if (!$isCreator && !$this->departmentModel->canRelease((int) $_SESSION['department_id'])) {
                 throw new AuthorizationException('Units cannot release documents.');
             }
 
@@ -2324,7 +2366,7 @@ class Documents extends Controller
                 && ($unitAssignment['status'] ?? '') === 'Completed';
             $canConfirmUnitAssignment = $canReturnUnitAssignment;
 
-            if (!empty($document['reference_document_id']) && $this->documentModel->canDepartmentViewDocument((int) $document['reference_document_id'], $deptId)) {
+            if (!empty($document['reference_document_id']) && ($this->isAdmin() || $this->documentModel->canDepartmentViewDocument((int) $document['reference_document_id'], $deptId))) {
                 $referencedDocument = $this->documentModel->findById((int) $document['reference_document_id']);
             }
 

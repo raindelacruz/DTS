@@ -50,7 +50,7 @@
             <h1><?php echo SITENAME; ?></h1>
         </div>
 
-        <div class="auth-help">Provide your ID number, name, department, and active email address. Your registration stays inactive until an administrator verifies the account.</div>
+        <div class="auth-help">Provide your ID number, name, department, and active email address. Your registration stays inactive until an administrator verifies the account.<?php if (!empty($data['invitation_required'])): ?> Use the employee details supplied with your invitation. Contact your system administrator if you need an invitation or assistance.<?php endif; ?></div>
 
         <?php if (!empty($data['message'])): ?>
             <div class="alert alert-danger"><?php echo htmlspecialchars($data['message']); ?></div>
@@ -58,6 +58,12 @@
 
         <form action="" method="POST">
             <?php echo csrfInput(); ?>
+            <?php if (!empty($data['invitation_required'])): ?>
+                <div class="field">
+                    <label for="invitation_code">Invitation Code</label>
+                    <input id="invitation_code" type="password" name="invitation_code" maxlength="64" autocomplete="off" spellcheck="false" required>
+                </div>
+            <?php endif; ?>
             <div class="form-grid">
                 <div class="field">
                     <label for="id_number">ID Number</label>

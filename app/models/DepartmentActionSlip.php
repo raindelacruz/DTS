@@ -160,11 +160,6 @@ class DepartmentActionSlip
         ");
 
         $this->ensureColumn('department_action_slips', 'title', "ALTER TABLE department_action_slips ADD COLUMN title VARCHAR(255) DEFAULT NULL AFTER slip_number");
-        $this->db->exec("
-            UPDATE department_action_slips
-            SET title = slip_number
-            WHERE title IS NULL OR TRIM(title) = ''
-        ");
         $this->ensureColumn('department_action_slips', 'receiving_level', "ALTER TABLE department_action_slips ADD COLUMN receiving_level VARCHAR(20) NOT NULL DEFAULT 'Department' AFTER reference_number");
         $this->ensureColumn('department_action_slips', 'urgent', "ALTER TABLE department_action_slips ADD COLUMN urgent TINYINT(1) NOT NULL DEFAULT 0 AFTER receiving_level");
         $this->ensureColumn('department_action_slips', 'receiving_division_id', "ALTER TABLE department_action_slips ADD COLUMN receiving_division_id INT(11) DEFAULT NULL AFTER receiving_department_id");
@@ -553,7 +548,7 @@ class DepartmentActionSlip
 
             $stmt->execute([
                 'slip_number' => $slipNumber,
-                'title' => trim((string) ($data['title'] ?? $slipNumber)),
+                'title' => trim((string) ($data['title'] ?? '')),
                 'external_source' => 'Staff Draft',
                 'date_received' => $data['date_received'],
                 'subject' => 'Draft action slip',
@@ -1031,6 +1026,52 @@ class DepartmentActionSlip
         return $user ?: null;
     }
 
+    public function getActiveStaffInDivisionHierarchy($divisionId, $slipId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT u.id, u.firstname, u.middle_initial, u.lastname, u.department_id,
+                d.division_name AS personnel_office_name
+            FROM users u JOIN departments d ON d.id = u.department_id
+            WHERE u.role = 'staff' AND u.status = 'active'
+                AND (d.id = :division_id OR (d.office_level = 'unit' AND d.parent_id = :parent_division_id))
+                AND NOT EXISTS (SELECT 1 FROM department_action_slip_assignments a
+                    WHERE a.slip_id = :slip_id AND a.assignment_type = 'staff'
+                        AND a.user_id = u.id AND a.status <> :cancelled)
+            ORDER BY d.division_name, u.lastname, u.firstname
+        ");
+        $stmt->execute(['division_id' => (int) $divisionId, 'parent_division_id' => (int) $divisionId,
+            'slip_id' => (int) $slipId, 'cancelled' => self::STATUS_CANCELLED]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function findActiveStaffInDivisionHierarchy($userId, $divisionId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT u.id, u.department_id FROM users u JOIN departments d ON d.id = u.department_id
+            WHERE u.id = :user_id AND u.role = 'staff' AND u.status = 'active'
+                AND (d.id = :division_id OR (d.office_level = 'unit' AND d.parent_id = :parent_division_id))
+            LIMIT 1
+        ");
+        $stmt->execute(['user_id' => (int) $userId, 'division_id' => (int) $divisionId,
+            'parent_division_id' => (int) $divisionId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    public function getEligibleStaffByDepartment($slipId, $departmentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT u.id, u.firstname, u.middle_initial, u.lastname FROM users u
+            WHERE u.department_id = :department_id AND u.role = 'staff' AND u.status = 'active'
+                AND NOT EXISTS (SELECT 1 FROM department_action_slip_assignments a
+                    WHERE a.slip_id = :slip_id AND a.assignment_type = 'staff'
+                        AND a.user_id = u.id AND a.status <> :cancelled)
+            ORDER BY u.lastname, u.firstname
+        ");
+        $stmt->execute(['department_id' => (int) $departmentId, 'slip_id' => (int) $slipId,
+            'cancelled' => self::STATUS_CANCELLED]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function getAssignments($slipId)
     {
         $stmt = $this->db->prepare("
@@ -1055,13 +1096,16 @@ class DepartmentActionSlip
     public function findStaffAssignmentForUser($slipId, $userId)
     {
         $stmt = $this->db->prepare("
-            SELECT *
-            FROM department_action_slip_assignments
-            WHERE slip_id = :slip_id
-            AND assignment_type = 'staff'
-            AND user_id = :user_id
-            AND status <> :cancelled
-            ORDER BY id DESC
+            SELECT a.*, reviewer.division_name AS reviewing_department_name,
+                CONCAT(assigner.firstname, ' ', assigner.lastname) AS assigned_by_name
+            FROM department_action_slip_assignments a
+            JOIN departments reviewer ON reviewer.id = a.department_id
+            JOIN users assigner ON assigner.id = a.assigned_by
+            WHERE a.slip_id = :slip_id
+            AND a.assignment_type = 'staff'
+            AND a.user_id = :user_id
+            AND a.status <> :cancelled
+            ORDER BY a.id DESC
             LIMIT 1
         ");
         $stmt->execute([
@@ -1317,7 +1361,7 @@ class DepartmentActionSlip
         return $assignment ?: null;
     }
 
-    private function hasUnresolvedUnitAssignmentsForDivision($slipId, $divisionId)
+    public function hasUnresolvedUnitAssignmentsForDivision($slipId, $divisionId)
     {
         $stmt = $this->db->prepare("
             SELECT COUNT(*)
@@ -1335,6 +1379,64 @@ class DepartmentActionSlip
             'cancelled' => self::STATUS_CANCELLED
         ]);
         return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function hasDelegatedAssignmentsForDivision($slipId, $divisionId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*) FROM department_action_slip_assignments a
+            LEFT JOIN departments unit ON unit.id = a.department_id
+            WHERE a.slip_id = :slip_id AND a.status <> :cancelled
+            AND ((a.assignment_type = 'unit' AND unit.parent_id = :division_id)
+                OR (a.assignment_type = 'staff' AND a.department_id = :staff_department_id))
+        ");
+        $stmt->execute(['slip_id' => (int) $slipId, 'cancelled' => self::STATUS_CANCELLED,
+            'division_id' => (int) $divisionId, 'staff_department_id' => (int) $divisionId]);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function delegateDivisionRecipients($slipId, $managerIds, $staffIds, $actorUserId, $divisionId, $remarks = '')
+    {
+        $this->db->beginTransaction();
+        try {
+            $lock = $this->db->prepare('SELECT id FROM department_action_slips WHERE id = :id FOR UPDATE');
+            $lock->execute(['id' => (int) $slipId]);
+            if (!$lock->fetchColumn() || $this->hasDelegatedAssignmentsForDivision($slipId, $divisionId)) {
+                throw new RuntimeException('This division has already delegated its work.');
+            }
+            $division = $this->findDivisionAssignmentForDepartment($slipId, $divisionId);
+            $slip = $this->requireSlip($slipId);
+            $status = $division['status'] ?? $slip['status'];
+            if ((!$division && (int) $slip['current_division_id'] !== (int) $divisionId)
+                || !in_array($status, [self::STATUS_RECEIVED, self::STATUS_FOR_ACTION, self::STATUS_RETURNED], true)) {
+                throw new RuntimeException('Receive the division assignment before delegating.');
+            }
+            if (!$managerIds && !$staffIds) { throw new RuntimeException('Select at least one recipient.'); }
+            $managers = [];
+            foreach ($managerIds as $id) {
+                $manager = $this->findActiveManagerInChildUnit($id, $divisionId);
+                if (!$manager) { throw new RuntimeException('Invalid unit manager.'); }
+                $managers[(int) $id] = $manager;
+            }
+            foreach ($staffIds as $id) {
+                if (!$this->findActiveStaffInDivisionHierarchy($id, $divisionId)) {
+                    throw new RuntimeException('Invalid division staff recipient.');
+                }
+                if ($this->findStaffAssignmentForUser($slipId, $id)) {
+                    throw new RuntimeException('A selected staff member already has an assignment on this action slip.');
+                }
+            }
+            foreach ($managers as $id => $manager) {
+                $this->delegateToUnit($slipId, (int) $manager['department_id'], $id, $actorUserId, $divisionId, $remarks);
+            }
+            foreach (array_unique($staffIds) as $id) {
+                $this->delegateToStaff($slipId, (int) $id, $actorUserId, $divisionId, $remarks);
+            }
+            $this->db->commit();
+        } catch (Throwable $error) {
+            if ($this->db->inTransaction()) { $this->db->rollBack(); }
+            throw $error;
+        }
     }
 
     private function upsertAssignment($slipId, $type, $departmentId, $userId, $assignedBy, $assignedByDepartmentId, $status, $remarks = '')
@@ -1470,6 +1572,30 @@ class DepartmentActionSlip
             SET " . implode(', ', $sets) . "
             WHERE " . implode(' AND ', $conditions) . "
         ");
+        $stmt->execute($params);
+        return $stmt->rowCount() > 0;
+    }
+
+    private function updateAssignmentById($assignmentId, $status, $fields = [])
+    {
+        $sets = ['status = :status'];
+        $params = [
+            'id' => (int) $assignmentId,
+            'status' => $status
+        ];
+
+        foreach ($fields as $field => $value) {
+            $sets[] = $field . ' = :' . $field;
+            $params[$field] = $value;
+        }
+
+        $stmt = $this->db->prepare("
+            UPDATE department_action_slip_assignments
+            SET " . implode(', ', $sets) . "
+            WHERE id = :id
+            AND status <> :cancelled
+        ");
+        $params['cancelled'] = self::STATUS_CANCELLED;
         $stmt->execute($params);
         return $stmt->rowCount() > 0;
     }
@@ -1732,27 +1858,108 @@ class DepartmentActionSlip
 
     public function delegateToStaff($slipId, $staffUserId, $actorUserId, $actorDepartmentId, $remarks = '')
     {
-        $slip = $this->requireSlip($slipId);
-        $oldStatus = $slip['status'];
-        $this->upsertAssignment($slipId, 'staff', $actorDepartmentId, $staffUserId, $actorUserId, $actorDepartmentId, self::STATUS_DELEGATED, $remarks);
-        $this->updateAssignmentStatus($slipId, 'unit', $actorDepartmentId, null, self::STATUS_FOR_ACTION);
-        $assignedStaffId = !empty($slip['assigned_staff_id']) ? (int) $slip['assigned_staff_id'] : (int) $staffUserId;
-        $newStatus = $this->rollupAssignmentStatus($slipId, self::STATUS_DELEGATED);
+        $ownsTransaction = !$this->db->inTransaction();
+        if ($ownsTransaction) { $this->db->beginTransaction(); }
+        try {
+            $lock = $this->db->prepare('SELECT id FROM department_action_slips WHERE id = :id FOR UPDATE');
+            $lock->execute(['id' => (int) $slipId]);
+            if (!$lock->fetchColumn()) { throw new RuntimeException('Action slip not found.'); }
+            $this->assertEligibleStaffRecipient($slipId, $staffUserId, $actorDepartmentId);
+            $slip = $this->requireSlip($slipId);
+            $oldStatus = $slip['status'];
+            $this->upsertAssignment($slipId, 'staff', $actorDepartmentId, $staffUserId, $actorUserId, $actorDepartmentId, self::STATUS_DELEGATED, $remarks);
+            $actorAssignmentType = $this->assignmentTypeForDepartment($actorDepartmentId);
+            if ($actorAssignmentType !== null) {
+                $this->updateAssignmentStatus($slipId, $actorAssignmentType, $actorDepartmentId, null, self::STATUS_FOR_ACTION);
+            }
+            $assignedStaffId = !empty($slip['assigned_staff_id']) ? (int) $slip['assigned_staff_id'] : (int) $staffUserId;
+            $newStatus = $this->rollupAssignmentStatus($slipId, self::STATUS_DELEGATED);
 
-        $this->updateSlipAndLog($slipId, [
-            'assigned_staff_id' => $assignedStaffId,
-            'status' => $newStatus
-        ], [
-            'action' => 'Further Delegated to Staff',
-            'actor_user_id' => $actorUserId,
-            'actor_department_id' => $actorDepartmentId,
-            'from_department_id' => $actorDepartmentId,
-            'to_department_id' => $actorDepartmentId,
-            'to_user_id' => $staffUserId,
-            'old_status' => $oldStatus,
-            'new_status' => $newStatus,
-            'remarks' => $remarks
-        ]);
+            $this->updateSlipAndLog($slipId, [
+                'assigned_staff_id' => $assignedStaffId,
+                'status' => $newStatus
+            ], [
+                'action' => 'Further Delegated to Staff',
+                'actor_user_id' => $actorUserId,
+                'actor_department_id' => $actorDepartmentId,
+                'from_department_id' => $actorDepartmentId,
+                'to_department_id' => $actorDepartmentId,
+                'to_user_id' => $staffUserId,
+                'old_status' => $oldStatus,
+                'new_status' => $newStatus,
+                'remarks' => $remarks
+            ]);
+            if ($ownsTransaction) { $this->db->commit(); }
+        } catch (Throwable $error) {
+            if ($ownsTransaction && $this->db->inTransaction()) { $this->db->rollBack(); }
+            throw $error;
+        }
+    }
+
+    private function assertEligibleStaffRecipient($slipId, $userId, $reviewingDepartmentId)
+    {
+        $type = $this->assignmentTypeForDepartment($reviewingDepartmentId);
+        $eligible = $type === 'division'
+            ? $this->findActiveStaffInDivisionHierarchy($userId, $reviewingDepartmentId)
+            : $this->findActiveUserInDepartment($userId, $reviewingDepartmentId, 'staff');
+        if (!$eligible) {
+            throw new RuntimeException('Select an active staff member within your delegation scope.');
+        }
+        if ($this->findStaffAssignmentForUser($slipId, $userId)) {
+            throw new RuntimeException('This staff member already has an assignment on this action slip. Select another recipient.');
+        }
+    }
+
+    public function delegateStaffRecipients($slipId, $staffIds, $actorUserId, $actorDepartmentId, $remarks = '')
+    {
+        $this->db->beginTransaction();
+        try {
+            $lock = $this->db->prepare('SELECT id FROM department_action_slips WHERE id = :id FOR UPDATE');
+            $lock->execute(['id' => (int) $slipId]);
+            if (!$lock->fetchColumn()) { throw new RuntimeException('Action slip not found.'); }
+            if (!$staffIds || $this->hasActiveStaffAssignmentsForDepartment($slipId, $actorDepartmentId)) {
+                throw new RuntimeException('Select recipients before the first staff delegation.');
+            }
+            $type = $this->assignmentTypeForDepartment($actorDepartmentId);
+            if ($type === 'division') {
+                throw new RuntimeException('Use the combined division delegation form.');
+            }
+            $assignment = $type === 'unit'
+                ? $this->findUnitAssignmentForDepartment($slipId, $actorDepartmentId)
+                : $this->findDepartmentAssignmentForDepartment($slipId, $actorDepartmentId);
+            $slip = $this->requireSlip($slipId);
+            $status = $assignment['status'] ?? $slip['status'];
+            if (($type === 'unit' && !$assignment)
+                || !in_array($status, [self::STATUS_RECEIVED, self::STATUS_FOR_ACTION, self::STATUS_RETURNED], true)) {
+                throw new RuntimeException('Receive your assignment before delegating to staff.');
+            }
+            foreach ($staffIds as $id) { $this->assertEligibleStaffRecipient($slipId, $id, $actorDepartmentId); }
+            foreach (array_unique($staffIds) as $id) {
+                $this->delegateToStaff($slipId, (int) $id, $actorUserId, $actorDepartmentId, $remarks);
+            }
+            $this->db->commit();
+        } catch (Throwable $error) {
+            if ($this->db->inTransaction()) { $this->db->rollBack(); }
+            throw $error;
+        }
+    }
+
+    private function assignmentTypeForDepartment($departmentId)
+    {
+        $stmt = $this->db->prepare("
+            SELECT office_level
+            FROM departments
+            WHERE id = :department_id
+            LIMIT 1
+        ");
+        $stmt->execute(['department_id' => (int) $departmentId]);
+        $officeLevel = (string) $stmt->fetchColumn();
+
+        if (in_array($officeLevel, ['department', 'division', 'unit'], true)) {
+            return $officeLevel;
+        }
+
+        return null;
     }
 
     public function startStaffAction($slipId, $actorUserId, $actorDepartmentId, $remarks = '')
@@ -1767,7 +1974,8 @@ class DepartmentActionSlip
     {
         $slip = $this->requireSlip($slipId);
         $oldStatus = $slip['status'];
-        $action = $oldStatus === self::STATUS_RETURNED ? 'Resubmitted by Staff' : 'Completed by Staff';
+        $assignment = $this->findStaffAssignmentForUser($slipId, $actorUserId);
+        $action = ($assignment['status'] ?? $oldStatus) === self::STATUS_RETURNED ? 'Resubmitted by Staff' : 'Completed by Staff';
         $this->updateStaffAssignmentStatus($slipId, $actorUserId, self::STATUS_COMPLETED, [
             'completed_at' => date('Y-m-d H:i:s'),
             'completed_by' => (int) $actorUserId,
@@ -1795,6 +2003,9 @@ class DepartmentActionSlip
         $slip = $this->requireSlip($slipId);
         $oldStatus = $slip['status'];
         $assignment = $assignmentId ? $this->findCompletedStaffAssignmentForDepartment($slipId, $assignmentId, $actorDepartmentId) : null;
+        if ($assignmentId && !$assignment) {
+            throw new RuntimeException('The selected completion is no longer available for return.');
+        }
         if (!$assignment) {
             $stmt = $this->db->prepare("
                 SELECT *
@@ -1844,7 +2055,7 @@ class DepartmentActionSlip
         return $staffUserId;
     }
 
-    public function confirmByUnitManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '', $assignmentId = null)
+    public function confirmByUnitManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '', $assignmentId = null, $attachment = null)
     {
         $slip = $this->requireSlip($slipId);
         $oldStatus = $slip['status'];
@@ -1885,7 +2096,6 @@ class DepartmentActionSlip
         $newStatus = $this->rollupAssignmentStatus($slipId, $unitStatus);
 
         $this->updateSlipAndLog($slipId, [
-            'assigned_staff_id' => null,
             'status' => $newStatus,
             'completed_at' => null,
             'completed_by' => null
@@ -1897,22 +2107,23 @@ class DepartmentActionSlip
             'to_user_id' => (int) $assignment['user_id'],
             'old_status' => $oldStatus,
             'new_status' => $newStatus,
-            'remarks' => $remarks
+            'remarks' => $remarks,
+            'attachment' => $attachment
         ]);
     }
 
-    public function completeByUnitManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '')
+    public function completeByUnitManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '', $attachment = null)
     {
         $slip = $this->requireSlip($slipId);
         $oldStatus = $slip['status'];
         $this->updateAssignmentStatus($slipId, 'unit', $actorDepartmentId, null, self::STATUS_COMPLETED, [
             'completed_at' => date('Y-m-d H:i:s'),
-            'completed_by' => (int) $actorUserId
+            'completed_by' => (int) $actorUserId,
+            'completion_attachment' => $attachment
         ]);
         $newStatus = $this->rollupAssignmentStatus($slipId, self::STATUS_COMPLETED);
 
         $this->updateSlipAndLog($slipId, [
-            'assigned_staff_id' => null,
             'status' => $newStatus,
             'completed_at' => $newStatus === self::STATUS_COMPLETED ? date('Y-m-d H:i:s') : null,
             'completed_by' => $newStatus === self::STATUS_COMPLETED ? (int) $actorUserId : null
@@ -1922,7 +2133,8 @@ class DepartmentActionSlip
             'actor_department_id' => $actorDepartmentId,
             'old_status' => $oldStatus,
             'new_status' => $newStatus,
-            'remarks' => $remarks
+            'remarks' => $remarks,
+            'attachment' => $attachment
         ]);
     }
 
@@ -1931,6 +2143,9 @@ class DepartmentActionSlip
         $slip = $this->requireSlip($slipId);
         $oldStatus = $slip['status'];
         $assignment = $assignmentId ? $this->findCompletedUnitAssignmentForDivision($slipId, $assignmentId, $actorDepartmentId) : null;
+        if ($assignmentId && !$assignment) {
+            throw new RuntimeException('The selected completion is no longer available for return.');
+        }
         if (!$assignment) {
             $stmt = $this->db->prepare("
                 SELECT unit_assignment.*
@@ -1963,7 +2178,6 @@ class DepartmentActionSlip
         $newStatus = $this->rollupAssignmentStatus($slipId, self::STATUS_RETURNED);
 
         $this->updateSlipAndLog($slipId, [
-            'assigned_staff_id' => null,
             'status' => $newStatus,
             'completed_at' => null,
             'completed_by' => null,
@@ -1983,60 +2197,85 @@ class DepartmentActionSlip
         return $unitId;
     }
 
-    public function confirmByDivisionManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '', $assignmentId = null)
+    public function confirmByDivisionManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '', $assignmentId = null, $attachment = null, $completionType = 'unit')
     {
-        $slip = $this->requireSlip($slipId);
-        $oldStatus = $slip['status'];
-        $confirmedUnitCompletion = false;
-        $confirmedUnitId = null;
-        $assignment = $assignmentId ? $this->findCompletedUnitAssignmentForDivision($slipId, $assignmentId, $actorDepartmentId) : null;
-        if (!$assignment && $assignmentId) {
-            throw new RuntimeException('No completed unit assignment is available for confirmation.');
-        }
+        $ownsTransaction = !$this->db->inTransaction();
+        if ($ownsTransaction) { $this->db->beginTransaction(); }
+        try {
+            $lock = $this->db->prepare('SELECT id FROM department_action_slips WHERE id = :id FOR UPDATE');
+            $lock->execute(['id' => (int) $slipId]);
+            if (!$lock->fetchColumn()) { throw new RuntimeException('Action slip not found.'); }
+            $slip = $this->requireSlip($slipId);
+            $oldStatus = $slip['status'];
+            $confirmedUnitCompletion = false;
+            $confirmedUnitId = null;
+            if (!in_array($completionType, ['unit', 'staff'], true)) {
+                throw new RuntimeException('Invalid completion type.');
+            }
+            if (!$assignmentId && $this->hasDelegatedAssignmentsForDivision($slipId, $actorDepartmentId)) {
+                throw new RuntimeException('Confirm each delegated assignment before completing the division.');
+            }
+            $assignment = $assignmentId
+                ? ($completionType === 'staff'
+                    ? $this->findCompletedStaffAssignmentForDepartment($slipId, $assignmentId, $actorDepartmentId)
+                    : $this->findCompletedUnitAssignmentForDivision($slipId, $assignmentId, $actorDepartmentId))
+                : null;
+            if (!$assignment && $assignmentId) {
+                throw new RuntimeException('No completed assignment is available for confirmation.');
+            }
 
-        if ($assignment) {
-            $this->updateAssignmentById((int) $assignment['id'], self::ASSIGNMENT_CONFIRMED, [
-                'completed_at' => date('Y-m-d H:i:s'),
-                'completed_by' => (int) $actorUserId
+            if ($assignment) {
+                $this->updateAssignmentById((int) $assignment['id'], self::ASSIGNMENT_CONFIRMED, [
+                    'completed_at' => date('Y-m-d H:i:s'),
+                    'completed_by' => (int) $actorUserId
+                ]);
+                $confirmedUnitCompletion = $completionType === 'unit';
+                $confirmedUnitId = (int) $assignment['department_id'];
+            }
+
+            $divisionStatus = (!$this->hasUnresolvedUnitAssignmentsForDivision($slipId, $actorDepartmentId)
+                && !$this->hasUnresolvedStaffAssignmentsForDepartment($slipId, $actorDepartmentId))
+                ? self::STATUS_COMPLETED
+                : self::STATUS_FOR_ACTION;
+            $divisionFields = $divisionStatus === self::STATUS_COMPLETED
+                ? ['completed_at' => date('Y-m-d H:i:s'), 'completed_by' => (int) $actorUserId]
+                : ['completed_at' => null, 'completed_by' => null];
+            $this->updateAssignmentStatus($slipId, 'division', $actorDepartmentId, null, $divisionStatus, $divisionFields);
+            $newStatus = $this->rollupAssignmentStatus($slipId, $divisionStatus);
+
+            $fields = [
+                'status' => $newStatus,
+                'completed_at' => $newStatus === self::STATUS_COMPLETED ? ($slip['completed_at'] ?: date('Y-m-d H:i:s')) : null,
+                'completed_by' => $newStatus === self::STATUS_COMPLETED ? (!empty($slip['completed_by']) ? (int) $slip['completed_by'] : (int) $actorUserId) : null
+            ];
+            $this->updateSlipAndLog($slipId, $fields, [
+                'action' => $assignment
+                    ? ($confirmedUnitCompletion ? 'Unit Completion Confirmed' : 'Staff Completion Confirmed')
+                    : 'Completed by Division',
+                'actor_user_id' => $actorUserId,
+                'actor_department_id' => $actorDepartmentId,
+                'to_department_id' => $confirmedUnitId,
+                'to_user_id' => $assignment && !$confirmedUnitCompletion ? (int) $assignment['user_id'] : null,
+                'old_status' => $oldStatus,
+                'new_status' => $newStatus,
+                'remarks' => $remarks,
+                'attachment' => $attachment
             ]);
-            $confirmedUnitCompletion = true;
-            $confirmedUnitId = (int) $assignment['department_id'];
+            if ($ownsTransaction) { $this->db->commit(); }
+        } catch (Throwable $error) {
+            if ($ownsTransaction && $this->db->inTransaction()) { $this->db->rollBack(); }
+            throw $error;
         }
-
-        $divisionStatus = (!$confirmedUnitCompletion || !$this->hasUnresolvedUnitAssignmentsForDivision($slipId, $actorDepartmentId))
-            ? self::STATUS_COMPLETED
-            : self::STATUS_FOR_ACTION;
-        $divisionFields = $divisionStatus === self::STATUS_COMPLETED
-            ? ['completed_at' => date('Y-m-d H:i:s'), 'completed_by' => (int) $actorUserId]
-            : ['completed_at' => null, 'completed_by' => null];
-        $this->updateAssignmentStatus($slipId, 'division', $actorDepartmentId, null, $divisionStatus, $divisionFields);
-        $newStatus = $this->rollupAssignmentStatus($slipId, $divisionStatus);
-
-        $this->updateSlipAndLog($slipId, [
-            'current_division_id' => null,
-            'current_unit_id' => null,
-            'assigned_staff_id' => null,
-            'status' => $newStatus,
-            'completed_at' => $newStatus === self::STATUS_COMPLETED ? ($slip['completed_at'] ?: date('Y-m-d H:i:s')) : null,
-            'completed_by' => $newStatus === self::STATUS_COMPLETED ? (!empty($slip['completed_by']) ? (int) $slip['completed_by'] : (int) $actorUserId) : null
-        ], [
-            'action' => $confirmedUnitCompletion ? 'Unit Completion Confirmed' : 'Completed by Division',
-            'actor_user_id' => $actorUserId,
-            'actor_department_id' => $actorDepartmentId,
-            'to_department_id' => $confirmedUnitId,
-            'old_status' => $oldStatus,
-            'new_status' => $newStatus,
-            'remarks' => $remarks
-        ]);
     }
 
-    public function completeByDepartmentManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '')
+    public function completeByDepartmentManager($slipId, $actorUserId, $actorDepartmentId, $remarks = '', $attachment = null)
     {
         $slip = $this->requireSlip($slipId);
         $oldStatus = $slip['status'];
         $this->updateAssignmentStatus($slipId, 'department', $actorDepartmentId, null, self::STATUS_COMPLETED, [
             'completed_at' => date('Y-m-d H:i:s'),
-            'completed_by' => (int) $actorUserId
+            'completed_by' => (int) $actorUserId,
+            'completion_attachment' => $attachment
         ]);
         $newStatus = $this->rollupAssignmentStatus($slipId, self::STATUS_COMPLETED);
 
@@ -2050,7 +2289,8 @@ class DepartmentActionSlip
             'actor_department_id' => $actorDepartmentId,
             'old_status' => $oldStatus,
             'new_status' => $newStatus,
-            'remarks' => $remarks
+            'remarks' => $remarks,
+            'attachment' => $attachment
         ]);
     }
 
@@ -2161,8 +2401,9 @@ class DepartmentActionSlip
 
     private function updateSlipAndLog($slipId, $fields, $event)
     {
+        $ownsTransaction = !$this->db->inTransaction();
         try {
-            $this->db->beginTransaction();
+            if ($ownsTransaction) { $this->db->beginTransaction(); }
 
             $sets = [];
             $params = ['id' => (int) $slipId];
@@ -2177,9 +2418,9 @@ class DepartmentActionSlip
             }
 
             $this->logEvent($slipId, $event);
-            $this->db->commit();
+            if ($ownsTransaction) { $this->db->commit(); }
         } catch (Exception $e) {
-            if ($this->db->inTransaction()) {
+            if ($ownsTransaction && $this->db->inTransaction()) {
                 $this->db->rollBack();
             }
             throw $e;

@@ -173,7 +173,7 @@ $renderTimelineRemarks = function ($log) use ($document) {
                         <div class="text-body-secondary"><?php echo nl2br(htmlspecialchars($recipientActionDetails['instruction'] ?: 'N/A')); ?></div>
                     </div>
                 <?php endif; ?>
-                <?php if (!empty($canReleaseOffice) && $document['status'] === 'Draft' && $document['origin_department_id'] == $_SESSION['department_id']): ?>
+                <?php if ($document['status'] === 'Draft' && (($document['origin_department_id'] == $_SESSION['department_id'] && !empty($canReleaseOffice)) || (int) ($document['created_by'] ?? 0) === (int) ($_SESSION['user_id'] ?? 0))): ?>
                     <a href="<?php echo URLROOT; ?>/documents/edit/<?php echo $document['id']; ?>" class="btn btn-outline-secondary w-100">Edit Draft</a>
                     <form action="<?php echo URLROOT; ?>/documents/release/<?php echo $document['id']; ?>" method="POST" class="m-0">
                         <?php echo csrfInput(); ?>

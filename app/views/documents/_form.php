@@ -8,6 +8,7 @@ $selectedManagerIds = array_map('intval', $selectedManagerIds ?? []);
 $selectedStaffIds = array_map('intval', $selectedStaffIds ?? []);
 $isDivisionManager = $isDivisionManager ?? false;
 $isDivisionStaff = $isDivisionStaff ?? false;
+$canSendToDivisionManagers = $canSendToDivisionManagers ?? false;
 $submitLabel = $submitLabel ?? 'Save Document';
 $formAction = $formAction ?? '';
 $cancelUrl = $cancelUrl ?? (URLROOT . '/documents');
@@ -169,7 +170,7 @@ $formMessage = $formMessage ?? '';
             </div>
             <div class="form-text">Use CC for offices that only need a copy or visibility.</div>
         </div>
-        <?php if ($isDivisionStaff): ?>
+        <?php if ($canSendToDivisionManagers): ?>
             <div class="col-lg-4">
                 <label class="form-label fw-semibold">Division Managers</label>
                 <div class="route-search-wrap">

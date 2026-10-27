@@ -8,6 +8,12 @@ if (is_file($composerAutoload)) {
 define('APPROOT', __DIR__);
 
 require_once APPROOT . '/config/config.php';
+require_once APPROOT . '/lib/ClientRequestContext.php';
+require_once APPROOT . '/lib/SecurityRequestMonitor.php';
+require_once APPROOT . '/lib/AuthenticationGuard.php';
+require_once APPROOT . '/lib/PasswordResetProtection.php';
+require_once APPROOT . '/lib/RegistrationProtection.php';
+require_once APPROOT . '/lib/AdminSecurity.php';
 require_once dirname(__DIR__) . '/helpers/auth_helper.php';
 
 require_once APPROOT . '/core/App.php';
