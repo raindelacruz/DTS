@@ -135,7 +135,7 @@ return [
         $model = file_get_contents($root . '/app/models/Document.php');
 
         test_assert(stripos($controller, "private function isAdmin()") !== false, 'Document controller should identify admin users explicitly.');
-        test_assert(stripos($controller, "if (\$this->isAdmin()) {\n            return [\$document, \$deptId, false];") !== false, 'Admin document view should bypass department-scoped authorization.');
+        test_assert(stripos(str_replace("\r\n", "\n", $controller), "if (\$this->isAdmin()) {\n            return [\$document, \$deptId, false];") !== false, 'Admin document view should bypass department-scoped authorization.');
         test_assert(stripos($controller, '$this->documentModel->paginateAllDocuments') !== false, 'Admin document list should use the global document paginator.');
         test_assert(stripos($controller, "\$this->isAdmin() || \$this->documentModel->canDepartmentViewDocument") !== false, 'Admin users should see referenced documents from any office.');
         test_assert(stripos($model, 'public function paginateAllDocuments') !== false, 'Document model should provide a global admin paginator.');
