@@ -96,6 +96,7 @@ class ActionSlips extends Controller
             $filters['_limit'] = $pagination['per_page'];
             $filters['_offset'] = $pagination['offset'];
             $slips = $this->slipModel->getVisible($this->currentUserId(), $this->currentDepartmentId(), $_SESSION['role'] ?? '', $filters);
+            $slips = $this->slipModel->withPendingActionNames($slips, true);
 
             $data = [
                 'slips' => $slips,
@@ -609,6 +610,7 @@ class ActionSlips extends Controller
                 }
             }
 
+            $slip = $this->slipModel->withPendingActionNames([$slip])[0];
             $currentDepartmentId = (int) ($slip['current_department_id'] ?: $slip['receiving_department_id']);
             $currentDivisionId = (int) ($slip['current_division_id'] ?: 0);
             $currentUnitId = (int) ($slip['current_unit_id'] ?? 0);

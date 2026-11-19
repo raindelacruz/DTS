@@ -19,6 +19,9 @@ $statusClasses = [
     .das-stat strong { display: block; font-size: 1.45rem; line-height: 1; margin-top: 0.25rem; }
     .das-table-card { border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden; box-shadow: 0 14px 36px rgba(15, 23, 42, 0.06); }
     .das-title { font-weight: 700; color: #0f172a; }
+    .das-title-link { text-decoration: none; }
+    .das-title-link:hover { color: #115e59; text-decoration: underline; }
+    .das-title-link:focus-visible { outline: 2px solid #115e59; outline-offset: 3px; border-radius: 2px; text-decoration: underline; }
     .das-meta { color: #64748b; font-size: 0.84rem; }
     .status-pill { border-radius: 999px; font-size: 0.74rem; font-weight: 800; padding: 0.34rem 0.62rem; display: inline-block; white-space: nowrap; }
     .das-filter-card { padding: 1rem !important; overflow: hidden; }
@@ -117,14 +120,14 @@ $statusClasses = [
 <div class="das-table-card bg-white">
     <div class="table-responsive">
         <table class="table table-modern align-middle mb-0">
-            <thead><tr><th>Action Slip</th><th>Action</th><th>Status</th><th>Current Owner</th><th>Assigned Staff</th><th>Deadline</th><th class="text-end">Action</th></tr></thead>
+            <thead><tr><th>Action Slip</th><th>Action</th><th>Status</th><th>Pending Action By</th><th>Deadline</th><th class="text-end">Action</th></tr></thead>
             <tbody>
                 <?php if (!empty($data['slips'])): ?>
                     <?php foreach ($data['slips'] as $slip): ?>
                         <?php $status = $slip['status'] ?? ''; $statusClass = $statusClasses[$status] ?? 'bg-light text-dark border'; ?>
                         <tr>
                             <td>
-                                <div class="das-title"><?php echo htmlspecialchars($slip['title'] ?: $slip['slip_number']); ?></div>
+                                <div><a href="<?php echo URLROOT; ?>/actionSlips/show/<?php echo (int) $slip['id']; ?>" class="das-title das-title-link"><?php echo htmlspecialchars($slip['title'] ?: $slip['slip_number'], ENT_QUOTES, 'UTF-8'); ?></a></div>
                                 <div class="das-meta"><?php echo htmlspecialchars($slip['slip_number']); ?> - <?php echo !empty($slip['urgent']) ? 'Urgent - ' : ''; ?><?php echo htmlspecialchars(date('M d, Y', strtotime($slip['date_received']))); ?></div>
                                 <?php if (!empty($slip['parent_slip_id']) && !empty($slip['parent_slip_number'])): ?>
                                     <div class="das-meta">Child assignment of <a href="<?php echo URLROOT; ?>/actionSlips/show/<?php echo (int) $slip['parent_slip_id']; ?>"><?php echo htmlspecialchars($slip['parent_slip_number']); ?></a></div>
@@ -132,14 +135,17 @@ $statusClasses = [
                             </td>
                             <td><?php echo htmlspecialchars($slip['required_action']); ?></td>
                             <td><span class="status-pill <?php echo $statusClass; ?>"><?php echo htmlspecialchars($status); ?></span></td>
-                            <td><?php echo htmlspecialchars($slip['current_unit_name'] ?: ($slip['current_division_name'] ?: ($slip['current_department_name'] ?? '-'))); ?></td>
-                            <td><?php echo htmlspecialchars($slip['assigned_staff_name'] ?: '-'); ?></td>
+                            <td class="text-break">
+                                <?php foreach (($slip['pending_action_names'] ?? [$slip['pending_action_by'] ?? 'Responsible person unavailable']) ?: ['No pending action'] as $pendingName): ?>
+                                    <div><?php echo htmlspecialchars($pendingName, ENT_QUOTES, 'UTF-8'); ?></div>
+                                <?php endforeach; ?>
+                            </td>
                             <td><?php echo !empty($slip['deadline']) ? htmlspecialchars(date('M d, Y', strtotime($slip['deadline']))) : '<span class="text-muted">-</span>'; ?></td>
                             <td class="text-end"><a href="<?php echo URLROOT; ?>/actionSlips/show/<?php echo (int) $slip['id']; ?>" class="btn btn-sm btn-outline-primary">View</a></td>
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <tr><td colspan="7" class="text-center py-5 text-muted">No department action slips found.</td></tr>
+                    <tr><td colspan="6" class="text-center py-5 text-muted">No department action slips found.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>

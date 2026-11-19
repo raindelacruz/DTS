@@ -1,5 +1,7 @@
 <?php
 
+require_once dirname(__DIR__) . '/lib/ActionSlipPendingAction.php';
+
 class DepartmentActionSlip
 {
     private $db;
@@ -679,6 +681,42 @@ class DepartmentActionSlip
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Enrich only already-authorized slips, with a fixed number of read-only queries. */
+    public function withPendingActionNames(array $slips, bool $firstNamesOnly = false): array
+    {
+        if (!$slips) {
+            return [];
+        }
+        $ids = array_values(array_unique(array_map(static function ($slip) { return (int) $slip['id']; }, $slips)));
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->prepare("SELECT * FROM department_action_slip_assignments WHERE slip_id IN ($placeholders) ORDER BY assigned_at, id");
+        $stmt->execute($ids);
+        $bySlip = [];
+        $userIds = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $assignment) {
+            $bySlip[(int) $assignment['slip_id']][] = $assignment;
+            if (!empty($assignment['user_id'])) { $userIds[] = (int) $assignment['user_id']; }
+        }
+        foreach ($slips as $slip) {
+            if (!empty($slip['assigned_staff_id'])) { $userIds[] = (int) $slip['assigned_staff_id']; }
+        }
+        $userIds = array_values(array_unique($userIds));
+        $userSql = "SELECT id, firstname, middle_initial, lastname, department_id, role, status FROM users WHERE role = 'manager'";
+        if ($userIds) { $userSql .= ' OR id IN (' . implode(',', array_fill(0, count($userIds), '?')) . ')'; }
+        $stmt = $this->db->prepare($userSql);
+        $stmt->execute($userIds);
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $departments = $this->db->query('SELECT id, parent_id, office_level FROM departments')->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($slips as &$slip) {
+            $slip['pending_action_names'] = ActionSlipPendingAction::names(
+                $slip, $bySlip[(int) $slip['id']] ?? [], $users, $departments, $firstNamesOnly
+            );
+            $slip['pending_action_by'] = ActionSlipPendingAction::label($slip['pending_action_names']);
+        }
+        unset($slip);
+        return $slips;
     }
 
     public function countVisible($userId, $departmentId, $role, $filters = [])

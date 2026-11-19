@@ -6,3 +6,4 @@ storage/uploads/*
 
 # Local full-system backups contain private data.
 /backups/
+/storage/backups/
